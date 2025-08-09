@@ -383,6 +383,21 @@ async function analyzeResearchPaper(text, filename) {
     
     const analysis = JSON.parse(analysisText);
     
+    // Ensure authors and keywords are arrays
+    if (typeof analysis.authors === 'string') {
+      analysis.authors = [analysis.authors];
+    }
+    if (!Array.isArray(analysis.authors)) {
+      analysis.authors = ['Unknown Author'];
+    }
+    
+    if (typeof analysis.keywords === 'string') {
+      analysis.keywords = analysis.keywords.split(',').map(k => k.trim());
+    }
+    if (!Array.isArray(analysis.keywords)) {
+      analysis.keywords = ['research'];
+    }
+    
     // Assign theme based on research area
     const themeId = await assignTheme(analysis.researchArea, analysis.keywords);
     analysis.themeId = themeId;
@@ -390,14 +405,14 @@ async function analyzeResearchPaper(text, filename) {
     return analysis;
   } catch (error) {
     console.error('AI analysis error:', error);
-    // Fallback analysis
+    // Fallback analysis - ensure arrays for authors and keywords
     return {
       title: filename.replace('.pdf', ''),
-      authors: ['Unknown'],
+      authors: ['Unknown Author'], // Ensure this is an array
       year: new Date().getFullYear(),
-      venue: 'Unknown',
+      venue: 'Unknown Venue',
       summary: 'Summary pending - automated analysis failed',
-      keywords: ['research'],
+      keywords: ['research', 'paper'], // Ensure this is an array
       themeId: 1, // Default theme
       researchArea: 'General Research'
     };
