@@ -1,6 +1,12 @@
 import { Dropbox } from 'dropbox';
 import { sql } from '@vercel/postgres';
 import { NextResponse } from 'next/server';
+import fetch from 'node-fetch';
+
+// Configure Dropbox to use node-fetch
+if (typeof globalThis.fetch === 'undefined') {
+  globalThis.fetch = fetch;
+}
 
 // Dynamically import pdf-parse only when needed to avoid build-time issues
 const getPDFParse = async () => {
@@ -19,9 +25,10 @@ export async function POST() {
       }, { status: 500 });
     }
 
-    // Initialize Dropbox client
+    // Initialize Dropbox client with explicit fetch
     const dbx = new Dropbox({ 
-      accessToken: process.env.DROPBOX_ACCESS_TOKEN 
+      accessToken: process.env.DROPBOX_ACCESS_TOKEN,
+      fetch: fetch
     });
 
     console.log('Starting Dropbox sync...');
