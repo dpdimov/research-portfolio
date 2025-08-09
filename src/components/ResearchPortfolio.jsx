@@ -91,6 +91,39 @@ const ResearchPortfolio = () => {
     }
   };
 
+  const handleReanalyzePapers = async () => {
+    if (confirm('This will re-analyze existing papers with AI to improve titles, authors, and summaries. Continue?')) {
+      setIsProcessing(true);
+      try {
+        const response = await fetch('/api/reanalyze-papers', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Update the research data with re-analyzed data
+          setResearchData(result.data);
+          
+          const message = `Re-analysis completed! Updated ${result.updatedCount} papers with AI analysis. ` +
+            `Total processed: ${result.totalProcessed}, Errors: ${result.errorCount}.`;
+          
+          alert(message);
+        } else {
+          alert('Re-analysis failed: ' + result.error);
+        }
+      } catch (error) {
+        console.error('Re-analysis error:', error);
+        alert('Re-analysis failed: ' + error.message);
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
   const handleChatSubmit = async () => {
     if (!currentMessage.trim()) return;
 
@@ -136,6 +169,14 @@ const ResearchPortfolio = () => {
                   >
                     <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
                     Clear & Re-sync
+                  </button>
+                  <button
+                    onClick={handleReanalyzePapers}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    Re-analyze Papers
                   </button>
                 </>
               )}
