@@ -491,14 +491,37 @@ async function updateResearchThemes() {
 }
 
 function formatPaperForClient(paper) {
+  // Safe JSON parsing with fallbacks
+  let authors;
+  try {
+    authors = JSON.parse(paper.authors);
+    if (!Array.isArray(authors)) {
+      authors = [paper.authors]; // If it's not an array, wrap it
+    }
+  } catch (error) {
+    // If parsing fails, treat as string and wrap in array
+    authors = [paper.authors || 'Unknown Author'];
+  }
+
+  let keywords;
+  try {
+    keywords = JSON.parse(paper.keywords);
+    if (!Array.isArray(keywords)) {
+      keywords = [paper.keywords]; // If it's not an array, wrap it
+    }
+  } catch (error) {
+    // If parsing fails, treat as string and wrap in array
+    keywords = [paper.keywords || 'research'];
+  }
+
   return {
     id: paper.id,
     title: paper.title,
-    authors: JSON.parse(paper.authors),
+    authors: authors,
     year: paper.year,
     venue: paper.venue,
     summary: paper.summary,
-    keywords: JSON.parse(paper.keywords),
+    keywords: keywords,
     themeId: paper.theme_id
   };
 }
