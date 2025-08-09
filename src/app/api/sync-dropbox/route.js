@@ -229,6 +229,14 @@ export async function POST() {
 
         try {
           console.log(`Storing ${file.name} in database...`);
+          console.log('Analysis data:', {
+            title: aiAnalysis.title,
+            authors: aiAnalysis.authors,
+            authorsType: typeof aiAnalysis.authors,
+            keywords: aiAnalysis.keywords,
+            keywordsType: typeof aiAnalysis.keywords
+          });
+          
           const paperResult = await sql`
             INSERT INTO papers (
               title, authors, year, venue, summary, keywords, 
