@@ -206,6 +206,7 @@ export async function POST() {
         let aiAnalysis;
         try {
           console.log(`Analyzing ${file.name}...`);
+          console.log(`ANTHROPIC_API_KEY available: ${!!process.env.ANTHROPIC_API_KEY}`);
           
           if (!process.env.ANTHROPIC_API_KEY) {
             // Create basic analysis without AI
@@ -213,6 +214,7 @@ export async function POST() {
             aiAnalysis = await createBasicAnalysis(pdfProcessResult, file.name);
           } else {
             // Use AI analysis
+            console.log(`Using AI analysis for ${file.name}`);
             aiAnalysis = await analyzeResearchPaper(pdfProcessResult.extractedText, file.name);
           }
           
