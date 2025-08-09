@@ -8,10 +8,31 @@ if (typeof globalThis.fetch === 'undefined') {
   globalThis.fetch = fetch;
 }
 
-// Dynamically import pdf-parse only when needed to avoid build-time issues
-const getPDFParse = async () => {
-  const PDFParse = (await import('pdf-parse')).default;
-  return PDFParse;
+// PDF text extraction using pdfjs-dist
+const extractPDFText = async (pdfBuffer) => {
+  try {
+    // Import pdfjs-dist with correct path
+    const pdfjs = await import('pdfjs-dist');
+    
+    // Load the PDF document
+    const pdf = await pdfjs.getDocument({ data: pdfBuffer }).promise;
+    const numPages = pdf.numPages;
+    
+    let fullText = '';
+    
+    // Extract text from each page
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    
+    return fullText.trim();
+  } catch (error) {
+    console.error('Error extracting PDF text:', error);
+    throw new Error('Failed to extract text from PDF: ' + error.message);
+  }
 };
 
 export async function POST() {
@@ -156,9 +177,7 @@ export async function POST() {
         let extractedText;
         try {
           console.log(`Extracting text from ${file.name}...`);
-          const PDFParse = await getPDFParse();
-          const pdfData = await PDFParse(pdfBuffer);
-          extractedText = pdfData.text;
+          extractedText = await extractPDFText(pdfBuffer);
 
           if (!extractedText || extractedText.trim().length === 0) {
             console.warn(`No text extracted from ${file.name}`);
