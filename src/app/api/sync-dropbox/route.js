@@ -341,12 +341,13 @@ async function analyzeResearchPaper(text, filename) {
       throw new Error('ANTHROPIC_API_KEY is not configured');
     }
 
+    console.log('Making Claude API request...');
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-        "anthropic-version": "2023-06-01"
+        "anthropic-version": "2024-06-01"
       },
       body: JSON.stringify({
         model: "claude-3-5-sonnet-20241022",
@@ -354,6 +355,12 @@ async function analyzeResearchPaper(text, filename) {
         messages: [{ role: "user", content: prompt }]
       })
     });
+
+    console.log('Claude API response status:', response.status);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.log('Claude API error response:', errorText);
+    }
 
     if (!response.ok) {
       throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
