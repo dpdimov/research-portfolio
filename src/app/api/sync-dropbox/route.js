@@ -123,7 +123,11 @@ export async function POST() {
     let skippedFiles = [];
     let errorFiles = [];
 
-    for (const file of pdfFiles) {
+    // For debugging, limit to first 5 files
+    const filesToProcess = pdfFiles.slice(0, 5);
+    console.log(`Processing first ${filesToProcess.length} files for debugging`);
+
+    for (const file of filesToProcess) {
       console.log(`Processing file: ${file.name} (${file.id})`);
       try {
         // Check if we've already processed this file
@@ -137,52 +141,86 @@ export async function POST() {
           continue;
         }
 
-        console.log(`Downloading ${file.name}...`);
-        // Download the PDF file
-        const downloadResponse = await dbx.filesDownload({ path: file.path_lower });
-        const pdfBuffer = downloadResponse.result.fileBinary;
-
-        console.log(`Extracting text from ${file.name}...`);
-        // Extract text from PDF
-        const PDFParse = await getPDFParse();
-        const pdfData = await PDFParse(pdfBuffer);
-        const extractedText = pdfData.text;
-
-        if (!extractedText || extractedText.trim().length === 0) {
-          console.warn(`No text extracted from ${file.name}`);
-          errorFiles.push({ name: file.name, error: 'No text extracted' });
+        let pdfBuffer;
+        try {
+          console.log(`Downloading ${file.name}...`);
+          const downloadResponse = await dbx.filesDownload({ path: file.path_lower });
+          pdfBuffer = downloadResponse.result.fileBinary;
+          console.log(`File ${file.name} downloaded, size: ${pdfBuffer?.length || 0} bytes`);
+        } catch (downloadError) {
+          console.error(`Download failed for ${file.name}:`, downloadError.message);
+          errorFiles.push({ name: file.name, error: downloadError.message, step: 'download' });
           continue;
         }
 
-        console.log(`Analyzing ${file.name} with AI...`);
-        // Process with Claude AI
-        const aiAnalysis = await analyzeResearchPaper(extractedText, file.name);
+        let extractedText;
+        try {
+          console.log(`Extracting text from ${file.name}...`);
+          const PDFParse = await getPDFParse();
+          const pdfData = await PDFParse(pdfBuffer);
+          extractedText = pdfData.text;
 
-        console.log(`Storing ${file.name} in database...`);
-        // Store in database
-        const paperResult = await sql`
-          INSERT INTO papers (
-            title, authors, year, venue, summary, keywords, 
-            theme_id, dropbox_file_id, dropbox_path, full_text
-          ) VALUES (
-            ${aiAnalysis.title}, ${JSON.stringify(aiAnalysis.authors)}, 
-            ${aiAnalysis.year}, ${aiAnalysis.venue}, ${aiAnalysis.summary},
-            ${JSON.stringify(aiAnalysis.keywords)}, ${aiAnalysis.themeId},
-            ${file.id}, ${file.path_lower}, ${extractedText.substring(0, 10000)}
-          ) RETURNING id
-        `;
+          if (!extractedText || extractedText.trim().length === 0) {
+            console.warn(`No text extracted from ${file.name}`);
+            errorFiles.push({ name: file.name, error: 'No text extracted', step: 'pdf_parse' });
+            continue;
+          }
+          console.log(`Extracted ${extractedText.length} characters from ${file.name}`);
+        } catch (parseError) {
+          console.error(`PDF parsing failed for ${file.name}:`, parseError.message);
+          errorFiles.push({ name: file.name, error: parseError.message, step: 'pdf_parse' });
+          continue;
+        }
 
-        processedPapers.push({
-          id: paperResult.rows[0].id,
-          ...aiAnalysis,
-          dropboxFileId: file.id
-        });
+        let aiAnalysis;
+        try {
+          console.log(`Analyzing ${file.name} with AI...`);
+          aiAnalysis = await analyzeResearchPaper(extractedText, file.name);
+          console.log(`AI analysis completed for ${file.name}`);
+        } catch (aiError) {
+          console.error(`AI analysis failed for ${file.name}:`, aiError.message);
+          errorFiles.push({ name: file.name, error: aiError.message, step: 'ai_analysis' });
+          continue;
+        }
 
-        newPapers++;
-        console.log(`Successfully processed ${file.name}`);
+        try {
+          console.log(`Storing ${file.name} in database...`);
+          const paperResult = await sql`
+            INSERT INTO papers (
+              title, authors, year, venue, summary, keywords, 
+              theme_id, dropbox_file_id, dropbox_path, full_text
+            ) VALUES (
+              ${aiAnalysis.title}, ${JSON.stringify(aiAnalysis.authors)}, 
+              ${aiAnalysis.year}, ${aiAnalysis.venue}, ${aiAnalysis.summary},
+              ${JSON.stringify(aiAnalysis.keywords)}, ${aiAnalysis.themeId},
+              ${file.id}, ${file.path_lower}, ${extractedText.substring(0, 10000)}
+            ) RETURNING id
+          `;
+
+          processedPapers.push({
+            id: paperResult.rows[0].id,
+            ...aiAnalysis,
+            dropboxFileId: file.id
+          });
+
+          newPapers++;
+          console.log(`Successfully processed ${file.name}`);
+        } catch (dbError) {
+          console.error(`Database insert failed for ${file.name}:`, dbError.message);
+          errorFiles.push({ name: file.name, error: dbError.message, step: 'database' });
+          continue;
+        }
       } catch (error) {
-        console.error(`Error processing file ${file.name}:`, error);
-        errorFiles.push({ name: file.name, error: error.message });
+        console.error(`Error processing file ${file.name}:`, {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+        errorFiles.push({ 
+          name: file.name, 
+          error: error.message,
+          step: 'unknown'
+        });
         // Continue with other files
       }
     }
