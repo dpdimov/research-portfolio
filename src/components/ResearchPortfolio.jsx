@@ -48,14 +48,15 @@ const ResearchPortfolio = () => {
     return matchesSearch && matchesTheme;
   });
 
-  const handleSync = async () => {
+  const handleSync = async (clearFirst = false) => {
     setIsProcessing(true);
     try {
       const response = await fetch('/api/sync-dropbox', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-        }
+        },
+        body: JSON.stringify({ clearFirst })
       });
 
       const result = await response.json();
@@ -64,8 +65,11 @@ const ResearchPortfolio = () => {
         // Update the research data with synced data
         setResearchData(result.data);
         
-        const message = `Sync completed! Found ${result.newPapers} new papers. ` +
-          `Total: ${result.summary.totalPdfFiles} PDF files, ` +
+        let message = clearFirst 
+          ? `Clear & Re-sync completed! Processed ${result.newPapers} papers with AI analysis. `
+          : `Sync completed! Found ${result.newPapers} new papers. `;
+          
+        message += `Total: ${result.summary.totalPdfFiles} PDF files, ` +
           `${result.summary.skippedFiles} already processed, ` +
           `${result.summary.errorFiles} errors.`;
         
@@ -78,6 +82,12 @@ const ResearchPortfolio = () => {
       alert('Sync failed: ' + error.message);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleClearAndResync = async () => {
+    if (confirm('This will delete all existing papers and re-process them with AI analysis. Continue?')) {
+      await handleSync(true);
     }
   };
 
@@ -110,14 +120,24 @@ const ResearchPortfolio = () => {
             </div>
             <div className="flex items-center gap-4">
               {isAdmin && (
-                <button
-                  onClick={handleSync}
-                  disabled={isProcessing}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                  Sync Dropbox
-                </button>
+                <>
+                  <button
+                    onClick={handleSync}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    Sync Dropbox
+                  </button>
+                  <button
+                    onClick={handleClearAndResync}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    Clear & Re-sync
+                  </button>
+                </>
               )}
               <button
                 onClick={() => setIsAdmin(!isAdmin)}

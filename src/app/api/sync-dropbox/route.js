@@ -57,8 +57,16 @@ const createBasicAnalysis = async (pdfProcessResult, filename) => {
   };
 };
 
-export async function POST() {
+export async function POST(request) {
   try {
+    // Parse request body to check for clearFirst flag
+    let clearFirst = false;
+    try {
+      const body = await request.json();
+      clearFirst = body.clearFirst || false;
+    } catch {
+      // No body or invalid JSON, use default
+    }
     // Check environment variables
     console.log('Environment check:');
     console.log('- DROPBOX_ACCESS_TOKEN:', process.env.DROPBOX_ACCESS_TOKEN ? 'Set' : 'Missing');
@@ -123,6 +131,14 @@ export async function POST() {
       `;
 
       console.log('Database tables verified/created successfully');
+
+      // Clear existing data if requested
+      if (clearFirst) {
+        console.log('Clearing existing papers and themes for fresh sync...');
+        await sql`DELETE FROM papers`;
+        await sql`DELETE FROM themes WHERE id > 1`; // Keep default theme
+        console.log('Database cleared successfully');
+      }
     } catch (dbError) {
       console.error('Database connection/setup failed:', dbError);
       return NextResponse.json({
