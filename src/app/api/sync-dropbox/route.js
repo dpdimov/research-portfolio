@@ -10,25 +10,51 @@ const getPDFParse = async () => {
 
 export async function POST() {
   try {
+    // Check if access token is configured
+    if (!process.env.DROPBOX_ACCESS_TOKEN) {
+      console.error('DROPBOX_ACCESS_TOKEN is not configured');
+      return NextResponse.json({
+        success: false,
+        error: 'Dropbox access token not configured'
+      }, { status: 500 });
+    }
+
     // Initialize Dropbox client
     const dbx = new Dropbox({ 
       accessToken: process.env.DROPBOX_ACCESS_TOKEN 
     });
 
+    console.log('Starting Dropbox sync...');
+
     // List files in your app folder
-    const response = await dbx.filesListFolder({
-      path: '', // Empty path for app folder root
-      recursive: false // Just main folder, no subfolders
-    });
+    let response;
+    try {
+      response = await dbx.filesListFolder({
+        path: '', // Empty path for app folder root
+        recursive: true // Include subfolders to catch all files
+      });
+      console.log(`Found ${response.result.entries.length} total entries in Dropbox`);
+    } catch (dropboxError) {
+      console.error('Dropbox API error:', dropboxError);
+      return NextResponse.json({
+        success: false,
+        error: 'Failed to access Dropbox: ' + dropboxError.message
+      }, { status: 500 });
+    }
 
     const pdfFiles = response.result.entries.filter(
       entry => entry['.tag'] === 'file' && entry.name.toLowerCase().endsWith('.pdf')
     );
 
+    console.log(`Found ${pdfFiles.length} PDF files:`, pdfFiles.map(f => f.name));
+
     let newPapers = 0;
     let processedPapers = [];
+    let skippedFiles = [];
+    let errorFiles = [];
 
     for (const file of pdfFiles) {
+      console.log(`Processing file: ${file.name} (${file.id})`);
       try {
         // Check if we've already processed this file
         const existingPaper = await sql`
@@ -36,22 +62,33 @@ export async function POST() {
         `;
 
         if (existingPaper.rows.length > 0) {
-          // Already processed, skip
+          console.log(`File ${file.name} already processed, skipping`);
+          skippedFiles.push(file.name);
           continue;
         }
 
+        console.log(`Downloading ${file.name}...`);
         // Download the PDF file
         const downloadResponse = await dbx.filesDownload({ path: file.path_lower });
         const pdfBuffer = downloadResponse.result.fileBinary;
 
+        console.log(`Extracting text from ${file.name}...`);
         // Extract text from PDF
         const PDFParse = await getPDFParse();
         const pdfData = await PDFParse(pdfBuffer);
         const extractedText = pdfData.text;
 
+        if (!extractedText || extractedText.trim().length === 0) {
+          console.warn(`No text extracted from ${file.name}`);
+          errorFiles.push({ name: file.name, error: 'No text extracted' });
+          continue;
+        }
+
+        console.log(`Analyzing ${file.name} with AI...`);
         // Process with Claude AI
         const aiAnalysis = await analyzeResearchPaper(extractedText, file.name);
 
+        console.log(`Storing ${file.name} in database...`);
         // Store in database
         const paperResult = await sql`
           INSERT INTO papers (
@@ -72,8 +109,10 @@ export async function POST() {
         });
 
         newPapers++;
+        console.log(`Successfully processed ${file.name}`);
       } catch (error) {
         console.error(`Error processing file ${file.name}:`, error);
+        errorFiles.push({ name: file.name, error: error.message });
         // Continue with other files
       }
     }
@@ -97,10 +136,20 @@ export async function POST() {
       ORDER BY t.name ASC
     `;
 
+    console.log(`Sync completed. New papers: ${newPapers}, Skipped: ${skippedFiles.length}, Errors: ${errorFiles.length}`);
+
     return NextResponse.json({
       success: true,
       newPapers,
       themesUpdated: updatedThemes.length,
+      summary: {
+        totalPdfFiles: pdfFiles.length,
+        newPapers,
+        skippedFiles: skippedFiles.length,
+        errorFiles: errorFiles.length,
+        skippedFileNames: skippedFiles,
+        errorDetails: errorFiles
+      },
       data: {
         papers: allPapers.rows.map(formatPaperForClient),
         themes: allThemes.rows.map(formatThemeForClient)
@@ -139,19 +188,34 @@ async function analyzeResearchPaper(text, filename) {
   `;
 
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('ANTHROPIC_API_KEY is not configured');
+    }
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
+        "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-3-5-sonnet-20241022",
         max_tokens: 1000,
         messages: [{ role: "user", content: prompt }]
       })
     });
 
+    if (!response.ok) {
+      throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
+    }
+
     const data = await response.json();
+    
+    if (!data.content || !data.content[0] || !data.content[0].text) {
+      throw new Error('Invalid response from Claude API');
+    }
+
     let analysisText = data.content[0].text;
     
     // Clean up potential markdown formatting

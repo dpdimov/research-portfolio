@@ -12,75 +12,33 @@ const ResearchPortfolio = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Mock data - in real app, this would come from your database
   const [researchData, setResearchData] = useState({
-    themes: [
-      {
-        id: 1,
-        name: "Machine Learning Applications",
-        description: "Practical applications of ML in various domains",
-        paperCount: 8,
-        color: "bg-blue-100 text-blue-800",
-        lastUpdated: "2024-12-15"
-      },
-      {
-        id: 2,
-        name: "Statistical Methods",
-        description: "Novel statistical approaches and methodologies",
-        paperCount: 6,
-        color: "bg-green-100 text-green-800",
-        lastUpdated: "2024-11-20"
-      },
-      {
-        id: 3,
-        name: "Data Analysis Techniques",
-        description: "Advanced techniques for complex data analysis",
-        paperCount: 5,
-        color: "bg-purple-100 text-purple-800",
-        lastUpdated: "2024-10-30"
-      },
-      {
-        id: 4,
-        name: "Computational Biology",
-        description: "Intersection of computation and biological sciences",
-        paperCount: 4,
-        color: "bg-orange-100 text-orange-800",
-        lastUpdated: "2024-09-15"
-      }
-    ],
-    papers: [
-      {
-        id: 1,
-        title: "Deep Learning Approaches for Genomic Sequence Analysis",
-        authors: ["Your Name", "Co-Author 1", "Co-Author 2"],
-        year: 2024,
-        venue: "Nature Biotechnology",
-        themeId: 1,
-        summary: "This paper presents novel deep learning architectures for analyzing genomic sequences, achieving state-of-the-art performance on benchmark datasets.",
-        keywords: ["deep learning", "genomics", "sequence analysis", "neural networks"]
-      },
-      {
-        id: 2,
-        title: "Robust Statistical Methods for High-Dimensional Data",
-        authors: ["Your Name", "Co-Author 3"],
-        year: 2024,
-        venue: "Journal of Statistical Software",
-        themeId: 2,
-        summary: "We develop new statistical methods that maintain robustness when dealing with high-dimensional datasets commonly found in modern applications.",
-        keywords: ["statistics", "high-dimensional", "robust methods", "methodology"]
-      },
-      {
-        id: 3,
-        title: "Unsupervised Learning for Biological Pattern Discovery",
-        authors: ["Your Name", "Co-Author 1", "Co-Author 4"],
-        year: 2023,
-        venue: "Bioinformatics",
-        themeId: 4,
-        summary: "Novel unsupervised learning techniques reveal hidden patterns in biological data, providing new insights into cellular processes.",
-        keywords: ["unsupervised learning", "biology", "pattern discovery", "clustering"]
-      }
-    ]
+    themes: [],
+    papers: []
   });
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [dataError, setDataError] = useState(null);
+
+  // Load data from database on component mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoadingData(true);
+        // For now, we'll just set empty data since the sync functionality
+        // will populate the database. In the future, you could add an API
+        // endpoint to fetch existing data from the database.
+        setResearchData({ themes: [], papers: [] });
+        setDataError(null);
+      } catch (error) {
+        console.error('Error loading research data:', error);
+        setDataError('Failed to load research data');
+      } finally {
+        setIsLoadingData(false);
+      }
+    };
+
+    loadData();
+  }, []);
 
   const filteredPapers = researchData.papers.filter(paper => {
     const matchesSearch = searchQuery === '' || 
@@ -92,11 +50,35 @@ const ResearchPortfolio = () => {
 
   const handleSync = async () => {
     setIsProcessing(true);
-    // Simulate syncing with Dropbox
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/sync-dropbox', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Update the research data with synced data
+        setResearchData(result.data);
+        
+        const message = `Sync completed! Found ${result.newPapers} new papers. ` +
+          `Total: ${result.summary.totalPdfFiles} PDF files, ` +
+          `${result.summary.skippedFiles} already processed, ` +
+          `${result.summary.errorFiles} errors.`;
+        
+        alert(message);
+      } else {
+        alert('Sync failed: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+      alert('Sync failed: ' + error.message);
+    } finally {
       setIsProcessing(false);
-      alert('Sync completed! Found 2 new papers and updated themes.');
-    }, 3000);
+    }
   };
 
   const handleChatSubmit = async () => {
@@ -271,13 +253,35 @@ const ResearchPortfolio = () => {
                 ))}
               </div>
 
-              {filteredPapers.length === 0 && (
+              {isLoadingData ? (
+                <div className="text-center py-12">
+                  <RefreshCw className="h-12 w-12 text-gray-400 mx-auto mb-4 animate-spin" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Loading research data...</h3>
+                  <p className="text-gray-600">Please wait while we load your papers</p>
+                </div>
+              ) : filteredPapers.length === 0 && researchData.papers.length === 0 ? (
                 <div className="text-center py-12">
                   <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No papers found</h3>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No research papers yet</h3>
+                  <p className="text-gray-600 mb-4">Use the "Sync Dropbox" button above to import your papers from Dropbox</p>
+                  {isAdmin && (
+                    <button
+                      onClick={handleSync}
+                      disabled={isProcessing}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                      Sync Dropbox
+                    </button>
+                  )}
+                </div>
+              ) : filteredPapers.length === 0 ? (
+                <div className="text-center py-12">
+                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No papers match your filters</h3>
                   <p className="text-gray-600">Try adjusting your search or theme filter</p>
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
         )}
