@@ -16,12 +16,75 @@ const getPDFParse = async () => {
 
 export async function POST() {
   try {
-    // Check if access token is configured
+    // Check environment variables
+    console.log('Environment check:');
+    console.log('- DROPBOX_ACCESS_TOKEN:', process.env.DROPBOX_ACCESS_TOKEN ? 'Set' : 'Missing');
+    console.log('- ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'Set' : 'Missing');
+    console.log('- POSTGRES_URL:', process.env.POSTGRES_URL ? 'Set' : 'Missing');
+    console.log('- DATABASE_URL:', process.env.DATABASE_URL ? 'Set' : 'Missing');
+    
     if (!process.env.DROPBOX_ACCESS_TOKEN) {
       console.error('DROPBOX_ACCESS_TOKEN is not configured');
       return NextResponse.json({
         success: false,
         error: 'Dropbox access token not configured'
+      }, { status: 500 });
+    }
+
+    // Test database connection and create tables if needed
+    try {
+      console.log('Testing database connection...');
+      const testResult = await sql`SELECT 1 as test`;
+      console.log('Database connection successful:', testResult);
+
+      // Create tables if they don't exist
+      console.log('Creating database tables if needed...');
+      await sql`
+        CREATE TABLE IF NOT EXISTS themes (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          description TEXT,
+          color VARCHAR(100) DEFAULT 'bg-blue-100 text-blue-800',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+
+      await sql`
+        CREATE TABLE IF NOT EXISTS papers (
+          id SERIAL PRIMARY KEY,
+          title TEXT NOT NULL,
+          authors JSONB NOT NULL DEFAULT '[]',
+          year INTEGER,
+          venue VARCHAR(255),
+          summary TEXT,
+          keywords JSONB NOT NULL DEFAULT '[]',
+          theme_id INTEGER REFERENCES themes(id),
+          dropbox_file_id VARCHAR(255) UNIQUE,
+          dropbox_path VARCHAR(500),
+          full_text TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+
+      // Create indexes
+      await sql`CREATE INDEX IF NOT EXISTS idx_papers_theme_id ON papers(theme_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_papers_dropbox_file_id ON papers(dropbox_file_id)`;
+
+      // Insert default theme if none exist
+      await sql`
+        INSERT INTO themes (name, description, color) 
+        SELECT 'General Research', 'General research papers', 'bg-gray-100 text-gray-800'
+        WHERE NOT EXISTS (SELECT 1 FROM themes)
+      `;
+
+      console.log('Database tables verified/created successfully');
+    } catch (dbError) {
+      console.error('Database connection/setup failed:', dbError);
+      return NextResponse.json({
+        success: false,
+        error: 'Database connection failed: ' + dbError.message
       }, { status: 500 });
     }
 
