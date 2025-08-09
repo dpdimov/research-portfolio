@@ -166,11 +166,7 @@ export async function POST() {
     let skippedFiles = [];
     let errorFiles = [];
 
-    // For debugging, limit to first 5 files
-    const filesToProcess = pdfFiles.slice(0, 5);
-    console.log(`Processing first ${filesToProcess.length} files for debugging`);
-
-    for (const file of filesToProcess) {
+    for (const file of pdfFiles) {
       console.log(`Processing file: ${file.name} (${file.id})`);
       try {
         // Check if we've already processed this file
@@ -229,13 +225,6 @@ export async function POST() {
 
         try {
           console.log(`Storing ${file.name} in database...`);
-          console.log('Analysis data:', {
-            title: aiAnalysis.title,
-            authors: aiAnalysis.authors,
-            authorsType: typeof aiAnalysis.authors,
-            keywords: aiAnalysis.keywords,
-            keywordsType: typeof aiAnalysis.keywords
-          });
           
           const paperResult = await sql`
             INSERT INTO papers (
