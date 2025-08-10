@@ -11,6 +11,10 @@ const ResearchPortfolio = () => {
   const [currentMessage, setCurrentMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null);
 
   const [researchData, setResearchData] = useState({
     themes: [],
@@ -24,11 +28,15 @@ const ResearchPortfolio = () => {
     const loadData = async () => {
       try {
         setIsLoadingData(true);
-        // For now, we'll just set empty data since the sync functionality
-        // will populate the database. In the future, you could add an API
-        // endpoint to fetch existing data from the database.
-        setResearchData({ themes: [], papers: [] });
-        setDataError(null);
+        const response = await fetch('/api/papers');
+        const result = await response.json();
+        
+        if (result.success) {
+          setResearchData(result.data);
+          setDataError(null);
+        } else {
+          setDataError('Failed to load research data: ' + result.error);
+        }
       } catch (error) {
         console.error('Error loading research data:', error);
         setDataError('Failed to load research data');
@@ -56,7 +64,7 @@ const ResearchPortfolio = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ clearFirst })
+        body: JSON.stringify({ clearFirst: Boolean(clearFirst) })
       });
 
       const result = await response.json();
@@ -141,6 +149,75 @@ const ResearchPortfolio = () => {
     }, 1000);
   };
 
+  const handleAdminToggle = () => {
+    if (isAdmin) {
+      setIsAdmin(false);
+    } else {
+      setShowAdminLogin(true);
+    }
+  };
+
+  const handleAdminLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await fetch('/api/admin-auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: adminPassword })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setIsAdmin(true);
+        setShowAdminLogin(false);
+        setAdminPassword('');
+      } else {
+        alert('Incorrect password');
+        setAdminPassword('');
+      }
+    } catch (error) {
+      console.error('Authentication error:', error);
+      alert('Authentication failed');
+      setAdminPassword('');
+    }
+  };
+
+  const handleAdminCancel = () => {
+    setShowAdminLogin(false);
+    setAdminPassword('');
+  };
+
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true);
+    setUpdateStatus(null);
+    try {
+      const response = await fetch('/api/check-new-papers');
+      const result = await response.json();
+      
+      if (result.success) {
+        setUpdateStatus(result);
+        if (result.needsSync) {
+          const message = `Found ${result.newFiles} new papers in Dropbox:\n\n${result.newFileNames.join('\n')}\n\nWould you like to sync them now?`;
+          if (confirm(message)) {
+            await handleSync(false);
+          }
+        } else {
+          alert(`No new papers found. Your database has ${result.existingInDatabase} papers, matching all ${result.totalDropboxFiles} PDF files in Dropbox.`);
+        }
+      } else {
+        alert('Failed to check for updates: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error checking updates:', error);
+      alert('Failed to check for updates: ' + error.message);
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -155,20 +232,20 @@ const ResearchPortfolio = () => {
               {isAdmin && (
                 <>
                   <button
+                    onClick={handleCheckUpdates}
+                    disabled={checkingUpdates || isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${checkingUpdates ? 'animate-spin' : ''}`} />
+                    Check for New Papers
+                  </button>
+                  <button
                     onClick={handleSync}
                     disabled={isProcessing}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
                     <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                    Sync Dropbox
-                  </button>
-                  <button
-                    onClick={handleClearAndResync}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                    Clear & Re-sync
+                    Sync New Papers
                   </button>
                   <button
                     onClick={handleReanalyzePapers}
@@ -176,16 +253,24 @@ const ResearchPortfolio = () => {
                     className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                   >
                     <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                    Re-analyze Papers
+                    Re-analyze with AI
+                  </button>
+                  <button
+                    onClick={handleClearAndResync}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    Clear & Re-sync All
                   </button>
                 </>
               )}
               <button
-                onClick={() => setIsAdmin(!isAdmin)}
+                onClick={handleAdminToggle}
                 className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 <Settings className="h-4 w-4" />
-                {isAdmin ? 'Exit Admin' : 'Admin Mode'}
+                {isAdmin ? 'Exit Admin' : 'Admin Login'}
               </button>
             </div>
           </div>
@@ -215,6 +300,45 @@ const ResearchPortfolio = () => {
           </nav>
         </div>
       </header>
+
+      {/* Admin Login Modal */}
+      {showAdminLogin && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96">
+            <h3 className="text-lg font-semibold mb-4">Admin Authentication</h3>
+            <form onSubmit={handleAdminLogin}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter admin password"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Login
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdminCancel}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

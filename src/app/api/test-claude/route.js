@@ -20,15 +20,22 @@ export async function POST() {
     console.log('- Last 10 chars:', apiKey.substring(apiKey.length - 10));
 
     // Test with a simple Claude API call
+    console.log('Making API request to Claude...');
+    console.log('Request headers:', {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey.substring(0, 20)}...`,
+      'anthropic-version': '2024-06-01'
+    });
+    
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-        "anthropic-version": "2023-06-01"
+        "Authorization": `Bearer ${apiKey.trim()}`,
+        "anthropic-version": "2024-06-01"
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
+        model: "claude-3-5-sonnet-20240620",
         max_tokens: 10,
         messages: [{ role: "user", content: "Hello" }]
       })

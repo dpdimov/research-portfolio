@@ -505,27 +505,18 @@ async function updateResearchThemes() {
 }
 
 function formatPaperForClient(paper) {
-  // Safe JSON parsing with fallbacks
-  let authors;
-  try {
-    authors = JSON.parse(paper.authors);
-    if (!Array.isArray(authors)) {
-      authors = [paper.authors]; // If it's not an array, wrap it
-    }
-  } catch (error) {
-    // If parsing fails, treat as string and wrap in array
-    authors = [paper.authors || 'Unknown Author'];
+  // PostgreSQL JSONB returns already parsed data, so no need to JSON.parse
+  let authors = paper.authors;
+  let keywords = paper.keywords;
+  
+  // Ensure authors is an array
+  if (!Array.isArray(authors)) {
+    authors = authors ? [authors] : ['Unknown Author'];
   }
-
-  let keywords;
-  try {
-    keywords = JSON.parse(paper.keywords);
-    if (!Array.isArray(keywords)) {
-      keywords = [paper.keywords]; // If it's not an array, wrap it
-    }
-  } catch (error) {
-    // If parsing fails, treat as string and wrap in array
-    keywords = [paper.keywords || 'research'];
+  
+  // Ensure keywords is an array
+  if (!Array.isArray(keywords)) {
+    keywords = keywords ? [keywords] : ['research'];
   }
 
   return {
