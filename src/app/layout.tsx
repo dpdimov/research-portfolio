@@ -13,8 +13,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Research Portfolio",
-  description: "Academic research portfolio and publications",
+  title: "Dimo Dimov (Innsyn Ltd)",
+  description: "Learning and building the future together.",
+  openGraph: {
+    title: "Dimo Dimov (Innsyn Ltd)",
+    description: "Learning and building the future together.",
+    type: "website",
+    siteName: "Dimo Dimov Research Portfolio",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Dimo Dimov (Innsyn Ltd)",
+    description: "Learning and building the future together.",
+  },
 };
 
 export const viewport = {
