@@ -18,7 +18,7 @@ export async function GET() {
       FROM themes t
       LEFT JOIN papers p ON t.id = p.theme_id
       GROUP BY t.id, t.name, t.description, t.color
-      ORDER BY t.name ASC
+      ORDER BY paper_count DESC, t.name ASC
     `;
 
     console.log(`Found ${allPapers.rows.length} papers and ${allThemes.rows.length} themes`);
@@ -63,7 +63,15 @@ function formatPaperForClient(paper) {
     venue: paper.venue,
     summary: paper.summary,
     keywords: keywords,
-    themeId: paper.theme_id
+    themeId: paper.theme_id,
+    doi: paper.doi,
+    link: paper.link,
+    volume: paper.volume,
+    issue: paper.issue,
+    pageStart: paper.page_start,
+    pageEnd: paper.page_end,
+    themeName: paper.theme_name,
+    themeColor: paper.theme_color
   };
 }
 

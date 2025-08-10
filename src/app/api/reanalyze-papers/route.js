@@ -18,9 +18,8 @@ export async function POST() {
     const papers = await sql`
       SELECT id, title, dropbox_path, full_text 
       FROM papers 
-      WHERE full_text IS NOT NULL 
-      ORDER BY id 
-      LIMIT 10
+      WHERE full_text IS NOT NULL AND LENGTH(full_text) > 100
+      ORDER BY id
     `;
 
     console.log(`Found ${papers.rows.length} papers to re-analyze`);
@@ -31,6 +30,8 @@ export async function POST() {
     for (const paper of papers.rows) {
       try {
         console.log(`Re-analyzing paper: ${paper.title}`);
+        console.log(`Full text length: ${paper.full_text ? paper.full_text.length : 'NULL'} characters`);
+        console.log(`Full text preview: ${paper.full_text ? paper.full_text.substring(0, 200) + '...' : 'NO TEXT'}`);
         
         // Extract filename from dropbox_path or use title
         const filename = paper.dropbox_path ? 
@@ -40,17 +41,13 @@ export async function POST() {
         // Use AI to analyze the paper
         const aiAnalysis = await analyzeResearchPaper(paper.full_text, filename);
 
-        // Update the paper in database
+        // ONLY update AI-generated fields, preserve original CSV data
         await sql`
           UPDATE papers 
           SET 
-            title = ${aiAnalysis.title},
-            authors = ${JSON.stringify(aiAnalysis.authors)},
-            year = ${aiAnalysis.year},
-            venue = ${aiAnalysis.venue},
             summary = ${aiAnalysis.summary},
-            keywords = ${JSON.stringify(aiAnalysis.keywords)},
-            theme_id = ${aiAnalysis.themeId}
+            theme_id = ${aiAnalysis.themeId},
+            updated_at = CURRENT_TIMESTAMP
           WHERE id = ${paper.id}
         `;
 
@@ -76,7 +73,7 @@ export async function POST() {
       FROM themes t
       LEFT JOIN papers p ON t.id = p.theme_id
       GROUP BY t.id, t.name, t.description, t.color
-      ORDER BY t.name ASC
+      ORDER BY paper_count DESC, t.name ASC
     `;
 
     return NextResponse.json({
@@ -102,24 +99,34 @@ export async function POST() {
 // AI analysis function (copied from sync-dropbox route)
 async function analyzeResearchPaper(text, filename) {
   const prompt = `
-    Analyze this research paper and extract the following information as JSON:
+    You are analyzing an academic paper by Dr. Dimo Dimov, a Professor of Entrepreneurship and Innovation at University of Bath. His research focuses on entrepreneurial thinking, new venture design, and venture capital funding.
 
     Paper text: "${text.substring(0, 8000)}"
+    Filename: "${filename}"
 
-    Please respond with a JSON object containing:
+    IMPORTANT JOURNAL ABBREVIATIONS FOR THIS RESEARCHER:
+    - JMS = Journal of Management Studies  
+    - JBV = Journal of Business Venturing
+    - ETP = Entrepreneurship Theory and Practice
+    - JSBM = Journal of Small Business Management
+    - JPIM = Journal of Product Innovation Management
+    - JMI = Journal of Management Inquiry
+    - JBVI = Journal of Business Venturing Insights
+    - AMR = Academy of Management Review
+
+    Extract information as JSON. BE CONSERVATIVE - use "Unknown" if you're not certain:
+
     {
-      "title": "extracted or inferred title",
-      "authors": ["author1", "author2"],
-      "year": 2024,
-      "venue": "journal or conference name",
-      "summary": "2-3 sentence summary of key contributions",
-      "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
-      "researchArea": "primary research area (e.g., 'Machine Learning', 'Statistics', 'Biology')"
+      "title": "extracted title from text (or 'Unknown' if not found)",
+      "authors": ["list only authors found in text", "or empty array if none found"],
+      "year": "year from text or filename (or null if uncertain)",
+      "venue": "full journal/conference name (use abbreviations above, or 'Unknown')",
+      "summary": "factual summary from abstract/content (or 'Content not available for analysis')",
+      "keywords": ["only keywords found in text", "related to entrepreneurship/innovation"],
+      "researchArea": "Entrepreneurship and Innovation"
     }
 
-    Extract accurate information where possible. If something cannot be determined from the text, make reasonable inferences based on the content and filename: "${filename}".
-
-    IMPORTANT: Respond ONLY with valid JSON. Do not include any other text.
+    DO NOT make up author names, venues, or specific details not in the text. Respond ONLY with valid JSON.
   `;
 
   try {
@@ -128,11 +135,11 @@ async function analyzeResearchPaper(text, filename) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.ANTHROPIC_API_KEY}`,
-        "anthropic-version": "2024-06-01"
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
+        model: "claude-sonnet-4-20250514",
         max_tokens: 1000,
         messages: [{ role: "user", content: prompt }]
       })
@@ -141,8 +148,10 @@ async function analyzeResearchPaper(text, filename) {
     console.log('Claude API response status:', response.status);
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Claude API error response:', errorText);
-      throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
+      console.error('Claude API error response:', errorText);
+      console.error('API Key present:', !!process.env.ANTHROPIC_API_KEY);
+      console.error('API Key starts with:', process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.substring(0, 10) + '...' : 'MISSING');
+      throw new Error(`Claude API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();
@@ -156,7 +165,33 @@ async function analyzeResearchPaper(text, filename) {
     // Clean up potential markdown formatting
     analysisText = analysisText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     
-    const analysis = JSON.parse(analysisText);
+    // Find JSON by looking for opening and closing braces
+    const jsonStart = analysisText.indexOf('{');
+    const jsonEnd = analysisText.lastIndexOf('}') + 1;
+    
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      analysisText = analysisText.substring(jsonStart, jsonEnd);
+    }
+    
+    console.log('Attempting to parse Claude response:', analysisText.substring(0, 200) + '...');
+    
+    let analysis;
+    try {
+      // Try parsing the original text first
+      analysis = JSON.parse(analysisText);
+    } catch (firstError) {
+      console.log('First parse failed, trying to fix JSON:', firstError.message);
+      
+      // Try to fix common JSON issues
+      let cleanedText = analysisText;
+      
+      // Fix unescaped quotes in title and other string values
+      cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)",/g, ': "$1\\"$2\\"$3",');
+      cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)"/g, ': "$1\\"$2\\"$3"');
+      
+      console.log('Trying with cleaned text:', cleanedText.substring(0, 200) + '...');
+      analysis = JSON.parse(cleanedText);
+    }
     
     // Ensure authors and keywords are arrays
     if (typeof analysis.authors === 'string') {
@@ -257,25 +292,29 @@ async function assignTheme(researchArea, keywords) {
 
 // Formatting functions
 function formatPaperForClient(paper) {
-  // Safe JSON parsing with fallbacks
-  let authors;
-  try {
-    authors = JSON.parse(paper.authors);
-    if (!Array.isArray(authors)) {
-      authors = [paper.authors];
+  // Handle JSONB data (already parsed by PostgreSQL)
+  let authors = paper.authors;
+  if (typeof authors === 'string') {
+    try {
+      authors = JSON.parse(authors);
+    } catch {
+      authors = [authors];
     }
-  } catch (error) {
-    authors = [paper.authors || 'Unknown Author'];
+  }
+  if (!Array.isArray(authors)) {
+    authors = [authors || 'Unknown Author'];
   }
 
-  let keywords;
-  try {
-    keywords = JSON.parse(paper.keywords);
-    if (!Array.isArray(keywords)) {
-      keywords = [paper.keywords];
+  let keywords = paper.keywords;
+  if (typeof keywords === 'string') {
+    try {
+      keywords = JSON.parse(keywords);
+    } catch {
+      keywords = [keywords];
     }
-  } catch (error) {
-    keywords = [paper.keywords || 'research'];
+  }
+  if (!Array.isArray(keywords)) {
+    keywords = [keywords || 'research'];
   }
 
   return {
@@ -286,7 +325,15 @@ function formatPaperForClient(paper) {
     venue: paper.venue,
     summary: paper.summary,
     keywords: keywords,
-    themeId: paper.theme_id
+    themeId: paper.theme_id,
+    doi: paper.doi,
+    link: paper.link,
+    volume: paper.volume,
+    issue: paper.issue,
+    pageStart: paper.page_start,
+    pageEnd: paper.page_end,
+    themeName: paper.theme_name,
+    themeColor: paper.theme_color
   };
 }
 

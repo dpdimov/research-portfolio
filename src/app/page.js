@@ -1,10 +1,10 @@
-import ResearchPortfolio from '@/components/ResearchPortfolio'
+import LandingPage from '@/components/LandingPage'
 
 export const metadata = {
-  title: 'Research Portfolio',
-  description: 'Explore my research themes and ask questions about my work',
+  title: 'Dr. [Your Name] - Research & Innovation',
+  description: 'Explore cutting-edge research and innovation. Browse my research portfolio, ask questions about my work, and discover research themes.',
 }
 
 export default function Home() {
-  return <ResearchPortfolio />
+  return <LandingPage />
 }

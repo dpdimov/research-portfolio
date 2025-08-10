@@ -1,9 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Search, FileText, MessageCircle, RefreshCw, Settings, ChevronRight, Calendar, Users, Tag } from 'lucide-react';
+import { Search, FileText, MessageCircle, RefreshCw, Settings, ChevronRight, Calendar, Users, Tag, Upload, ExternalLink, Download, X, Edit3 } from 'lucide-react';
+import Navigation from './Navigation';
+import { useSearchParams } from 'next/navigation';
 
 const ResearchPortfolio = () => {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('browse');
   const [selectedTheme, setSelectedTheme] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -13,8 +16,14 @@ const ResearchPortfolio = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState(null);
+  const [showCsvUpload, setShowCsvUpload] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [isUploadingCsv, setIsUploadingCsv] = useState(false);
+  const [clearExistingPapers, setClearExistingPapers] = useState(true);
+  const [selectedPaper, setSelectedPaper] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingPaper, setEditingPaper] = useState(null);
+  const [editFormData, setEditFormData] = useState({});
 
   const [researchData, setResearchData] = useState({
     themes: [],
@@ -22,6 +31,14 @@ const ResearchPortfolio = () => {
   });
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [dataError, setDataError] = useState(null);
+
+  // Check URL parameter for tab selection
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'chat') {
+      setActiveTab('chat');
+    }
+  }, [searchParams]);
 
   // Load data from database on component mount
   useEffect(() => {
@@ -56,48 +73,6 @@ const ResearchPortfolio = () => {
     return matchesSearch && matchesTheme;
   });
 
-  const handleSync = async (clearFirst = false) => {
-    setIsProcessing(true);
-    try {
-      const response = await fetch('/api/sync-dropbox', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ clearFirst: Boolean(clearFirst) })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Update the research data with synced data
-        setResearchData(result.data);
-        
-        let message = clearFirst 
-          ? `Clear & Re-sync completed! Processed ${result.newPapers} papers with AI analysis. `
-          : `Sync completed! Found ${result.newPapers} new papers. `;
-          
-        message += `Total: ${result.summary.totalPdfFiles} PDF files, ` +
-          `${result.summary.skippedFiles} already processed, ` +
-          `${result.summary.errorFiles} errors.`;
-        
-        alert(message);
-      } else {
-        alert('Sync failed: ' + result.error);
-      }
-    } catch (error) {
-      console.error('Sync error:', error);
-      alert('Sync failed: ' + error.message);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleClearAndResync = async () => {
-    if (confirm('This will delete all existing papers and re-process them with AI analysis. Continue?')) {
-      await handleSync(true);
-    }
-  };
 
   const handleReanalyzePapers = async () => {
     if (confirm('This will re-analyze existing papers with AI to improve titles, authors, and summaries. Continue?')) {
@@ -190,40 +165,274 @@ const ResearchPortfolio = () => {
     setAdminPassword('');
   };
 
-  const handleCheckUpdates = async () => {
-    setCheckingUpdates(true);
-    setUpdateStatus(null);
-    try {
-      const response = await fetch('/api/check-new-papers');
-      const result = await response.json();
+
+  const handleCsvUpload = async () => {
+    if (!csvFile) {
+      alert('Please select a CSV file first');
+      return;
+    }
+
+    const confirmMessage = clearExistingPapers 
+      ? 'This will import papers from the CSV file and REPLACE all existing data. Continue?'
+      : 'This will import papers from the CSV file and ADD to existing data. Continue?';
       
-      if (result.success) {
-        setUpdateStatus(result);
-        if (result.needsSync) {
-          const message = `Found ${result.newFiles} new papers in Dropbox:\n\n${result.newFileNames.join('\n')}\n\nWould you like to sync them now?`;
-          if (confirm(message)) {
-            await handleSync(false);
-          }
+    if (confirm(confirmMessage)) {
+      setIsUploadingCsv(true);
+      try {
+        const formData = new FormData();
+        formData.append('csvFile', csvFile);
+        formData.append('clearExisting', clearExistingPapers.toString());
+
+        const response = await fetch('/api/import-csv', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Update the research data with imported data
+          setResearchData(result.data);
+          
+          const message = `CSV import completed! Imported ${result.importCount} papers. ` +
+            `Errors: ${result.errorCount}.`;
+          
+          alert(message);
+          setShowCsvUpload(false);
+          setCsvFile(null);
         } else {
-          alert(`No new papers found. Your database has ${result.existingInDatabase} papers, matching all ${result.totalDropboxFiles} PDF files in Dropbox.`);
+          alert('CSV import failed: ' + result.error);
         }
+      } catch (error) {
+        console.error('CSV import error:', error);
+        alert('CSV import failed: ' + error.message);
+      } finally {
+        setIsUploadingCsv(false);
+      }
+    }
+  };
+
+  const handleCsvFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type === 'text/csv') {
+      setCsvFile(file);
+    } else {
+      alert('Please select a valid CSV file');
+      e.target.value = '';
+    }
+  };
+
+  const handleCsvUploadCancel = () => {
+    setShowCsvUpload(false);
+    setCsvFile(null);
+    setClearExistingPapers(true);
+  };
+
+  const handleViewPaper = (paper) => {
+    setSelectedPaper(paper);
+  };
+
+  const handleClosePaper = () => {
+    setSelectedPaper(null);
+  };
+
+  const handleDownloadPdf = async (paper) => {
+    try {
+      setIsProcessing(true);
+      
+      const response = await fetch('/api/get-pdf-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          paperId: paper.id,
+          paperTitle: paper.title,
+          paperYear: paper.year,
+          paperAuthors: paper.authors
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Create a temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = result.downloadUrl;
+        link.download = result.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
       } else {
-        alert('Failed to check for updates: ' + result.error);
+        alert(`PDF not found: ${result.error}`);
       }
     } catch (error) {
-      console.error('Error checking updates:', error);
-      alert('Failed to check for updates: ' + error.message);
+      console.error('Download error:', error);
+      alert('Failed to download PDF: ' + error.message);
     } finally {
-      setCheckingUpdates(false);
+      setIsProcessing(false);
     }
+  };
+
+  const handleReanalyzeSinglePaper = async (paper) => {
+    if (confirm(`Re-analyze "${paper.title}" with Claude Sonnet 4?\n\nThis will update the summary and theme assignment while preserving all original data.`)) {
+      try {
+        setIsProcessing(true);
+        
+        const response = await fetch('/api/reanalyze-paper', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            paperId: paper.id
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          alert(`Paper re-analyzed successfully!\n\nUpdated: ${result.message}`);
+          
+          // Refresh the data to show updated paper
+          const refreshResponse = await fetch('/api/papers');
+          const refreshResult = await refreshResponse.json();
+          if (refreshResult.success) {
+            setResearchData(refreshResult.data);
+            // Update the selected paper with new data
+            const updatedPaper = refreshResult.data.papers.find(p => p.id === paper.id);
+            if (updatedPaper) {
+              setSelectedPaper(updatedPaper);
+            }
+          }
+        } else {
+          alert(`Re-analysis failed: ${result.error}`);
+        }
+      } catch (error) {
+        console.error('Re-analysis error:', error);
+        alert('Failed to re-analyze paper: ' + error.message);
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  const handleEditPaper = (paper) => {
+    setEditingPaper(paper);
+    setEditFormData({
+      title: paper.title,
+      authors: paper.authors.join('; '),
+      year: paper.year,
+      venue: paper.venue,
+      abstract: paper.summary || '',
+      keywords: paper.keywords.join('; '),
+      doi: paper.doi || '',
+      link: paper.link || '',
+      volume: paper.volume || '',
+      issue: paper.issue || '',
+      pageStart: paper.pageStart || '',
+      pageEnd: paper.pageEnd || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingPaper) return;
+
+    try {
+      setIsProcessing(true);
+
+      // Parse authors and keywords back to arrays
+      const authorsArray = editFormData.authors.split(';').map(a => a.trim()).filter(a => a);
+      const keywordsArray = editFormData.keywords.split(';').map(k => k.trim()).filter(k => k);
+
+      const updates = {
+        title: editFormData.title,
+        authors: authorsArray,
+        year: parseInt(editFormData.year),
+        venue: editFormData.venue,
+        abstract: editFormData.abstract,
+        keywords: keywordsArray,
+        doi: editFormData.doi,
+        link: editFormData.link,
+        volume: editFormData.volume,
+        issue: editFormData.issue,
+        pageStart: editFormData.pageStart,
+        pageEnd: editFormData.pageEnd
+      };
+
+      const response = await fetch('/api/update-paper', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          paperId: editingPaper.id,
+          updates: updates
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('Paper updated successfully!');
+        
+        // Refresh the data
+        const refreshResponse = await fetch('/api/papers');
+        const refreshResult = await refreshResponse.json();
+        if (refreshResult.success) {
+          setResearchData(refreshResult.data);
+          // Update selected paper if it's still open
+          const updatedPaper = refreshResult.data.papers.find(p => p.id === editingPaper.id);
+          if (updatedPaper) {
+            setSelectedPaper(updatedPaper);
+          }
+        }
+        
+        setShowEditModal(false);
+        setEditingPaper(null);
+        setEditFormData({});
+      } else {
+        alert('Failed to update paper: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Update error:', error);
+      alert('Failed to update paper: ' + error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditModal(false);
+    setEditingPaper(null);
+    setEditFormData({});
+  };
+
+  const handleFormChange = (field, value) => {
+    setEditFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const formatCitation = (paper) => {
+    const authors = paper.authors.join(', ');
+    const pages = paper.pageStart && paper.pageEnd ? `, ${paper.pageStart}-${paper.pageEnd}` : '';
+    const volume = paper.volume ? `, ${paper.volume}` : '';
+    const issue = paper.issue ? `(${paper.issue})` : '';
+    return `${authors} (${paper.year}). ${paper.title}. ${paper.venue}${volume}${issue}${pages}.`;
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
+      {/* Navigation */}
+      <Navigation />
+      
+      {/* Page Header */}
+      <div className="bg-white border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Research Portfolio</h1>
               <p className="mt-1 text-gray-600">Explore themes and ask questions about my research</p>
@@ -231,22 +440,6 @@ const ResearchPortfolio = () => {
             <div className="flex items-center gap-4">
               {isAdmin && (
                 <>
-                  <button
-                    onClick={handleCheckUpdates}
-                    disabled={checkingUpdates || isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${checkingUpdates ? 'animate-spin' : ''}`} />
-                    Check for New Papers
-                  </button>
-                  <button
-                    onClick={handleSync}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                    Sync New Papers
-                  </button>
                   <button
                     onClick={handleReanalyzePapers}
                     disabled={isProcessing}
@@ -256,18 +449,18 @@ const ResearchPortfolio = () => {
                     Re-analyze with AI
                   </button>
                   <button
-                    onClick={handleClearAndResync}
-                    disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                    onClick={() => setShowCsvUpload(true)}
+                    disabled={isProcessing || isUploadingCsv}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
                   >
-                    <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                    Clear & Re-sync All
+                    <Upload className="h-4 w-4" />
+                    Import CSV
                   </button>
                 </>
               )}
               <button
                 onClick={handleAdminToggle}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-900"
               >
                 <Settings className="h-4 w-4" />
                 {isAdmin ? 'Exit Admin' : 'Admin Login'}
@@ -275,8 +468,8 @@ const ResearchPortfolio = () => {
             </div>
           </div>
           
-          {/* Navigation */}
-          <nav className="flex space-x-8 pb-4">
+          {/* Tab Navigation */}
+          <nav className="flex space-x-8 pt-4">
             <button
               onClick={() => setActiveTab('browse')}
               className={`pb-2 px-1 border-b-2 font-medium text-sm ${
@@ -299,23 +492,23 @@ const ResearchPortfolio = () => {
             </button>
           </nav>
         </div>
-      </header>
+      </div>
 
       {/* Admin Login Modal */}
       {showAdminLogin && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96">
-            <h3 className="text-lg font-semibold mb-4">Admin Authentication</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Admin Authentication</h3>
             <form onSubmit={handleAdminLogin}>
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
                   Password
                 </label>
                 <input
                   type="password"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   placeholder="Enter admin password"
                   autoFocus
                 />
@@ -340,6 +533,70 @@ const ResearchPortfolio = () => {
         </div>
       )}
 
+      {/* CSV Upload Modal */}
+      {showCsvUpload && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96">
+            <h3 className="text-lg font-semibold mb-4">Import Papers from CSV</h3>
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-3">
+                Upload a CSV file with your academic papers. Expected columns:
+                Authors, Title, Year, Source title, DOI, Abstract, Author Keywords, etc.
+              </p>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                CSV File
+              </label>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCsvFileChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              {csvFile && (
+                <p className="text-sm text-green-600 mt-2">
+                  Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(1)} KB)
+                </p>
+              )}
+              <div className="mt-4">
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={clearExistingPapers}
+                    onChange={(e) => setClearExistingPapers(e.target.checked)}
+                    className="mr-2 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Clear existing papers before import (recommended for fresh data)
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCsvUpload}
+                disabled={!csvFile || isUploadingCsv}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isUploadingCsv ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                {isUploadingCsv ? 'Importing...' : 'Import CSV'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCsvUploadCancel}
+                disabled={isUploadingCsv}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'browse' && (
@@ -355,8 +612,8 @@ const ResearchPortfolio = () => {
                       selectedTheme === null ? 'bg-blue-50 border-blue-200 border' : 'hover:bg-gray-50'
                     }`}
                   >
-                    <div className="font-medium">All Papers</div>
-                    <div className="text-sm text-gray-500">{researchData.papers.length} papers</div>
+                    <div className="font-medium text-gray-900">All Papers</div>
+                    <div className="text-sm text-gray-700">{researchData.papers.length} papers</div>
                   </button>
                   {researchData.themes.map(theme => (
                     <button
@@ -367,12 +624,12 @@ const ResearchPortfolio = () => {
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium">{theme.name}</span>
+                        <span className="font-medium text-gray-900">{theme.name}</span>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${theme.color}`}>
                           {theme.paperCount}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-600">{theme.description}</p>
+                      <p className="text-sm text-gray-700">{theme.description}</p>
                     </button>
                   ))}
                 </div>
@@ -384,7 +641,7 @@ const ResearchPortfolio = () => {
               {/* Search Bar */}
               <div className="mb-6">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-5 w-5" />
                   <input
                     type="text"
                     placeholder="Search papers, keywords, or topics..."
@@ -430,7 +687,10 @@ const ResearchPortfolio = () => {
                           ))}
                         </div>
                       </div>
-                      <button className="flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium">
+                      <button 
+                        onClick={() => handleViewPaper(paper)}
+                        className="flex items-center text-blue-600 hover:text-blue-800 text-sm font-medium"
+                      >
                         View Details <ChevronRight className="h-4 w-4 ml-1" />
                       </button>
                     </div>
@@ -449,16 +709,6 @@ const ResearchPortfolio = () => {
                   <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No research papers yet</h3>
                   <p className="text-gray-600 mb-4">Use the "Sync Dropbox" button above to import your papers from Dropbox</p>
-                  {isAdmin && (
-                    <button
-                      onClick={handleSync}
-                      disabled={isProcessing}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
-                      Sync Dropbox
-                    </button>
-                  )}
                 </div>
               ) : filteredPapers.length === 0 ? (
                 <div className="text-center py-12">
@@ -544,6 +794,367 @@ const ResearchPortfolio = () => {
           </div>
         )}
       </main>
+
+      {/* Paper Detail Modal */}
+      {selectedPaper && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-start">
+              <div className="flex-1 pr-4">
+                <h2 className="text-xl font-semibold text-gray-900 leading-tight">
+                  {selectedPaper.title}
+                </h2>
+                <div className="flex items-center text-sm text-gray-600 mt-2">
+                  <Users className="h-4 w-4 mr-1" />
+                  <span>{selectedPaper.authors.join(', ')}</span>
+                  <span className="mx-2">•</span>
+                  <Calendar className="h-4 w-4 mr-1" />
+                  <span>{selectedPaper.year}</span>
+                </div>
+              </div>
+              <button
+                onClick={handleClosePaper}
+                className="flex-shrink-0 p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              {/* Publication Details */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Publication Details</h3>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <span className="font-medium text-gray-700">Journal/Venue:</span>
+                      <p className="text-gray-900">{selectedPaper.venue}</p>
+                    </div>
+                    {selectedPaper.volume && (
+                      <div>
+                        <span className="font-medium text-gray-700">Volume:</span>
+                        <p className="text-gray-900">{selectedPaper.volume}</p>
+                      </div>
+                    )}
+                    {selectedPaper.issue && (
+                      <div>
+                        <span className="font-medium text-gray-700">Issue:</span>
+                        <p className="text-gray-900">{selectedPaper.issue}</p>
+                      </div>
+                    )}
+                    {selectedPaper.pageStart && selectedPaper.pageEnd && (
+                      <div>
+                        <span className="font-medium text-gray-700">Pages:</span>
+                        <p className="text-gray-900">{selectedPaper.pageStart}-{selectedPaper.pageEnd}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Abstract/Summary */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Abstract</h3>
+                <p className="text-gray-700 leading-relaxed">{selectedPaper.summary}</p>
+              </div>
+
+              {/* Keywords */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Keywords</h3>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPaper.keywords.map((keyword, index) => (
+                    <span
+                      key={index}
+                      className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                    >
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Citation */}
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Citation</h3>
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="text-gray-700 text-sm leading-relaxed font-mono">
+                    {formatCitation(selectedPaper)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Links */}
+              <div className="flex flex-wrap gap-3">
+                {selectedPaper.doi && (
+                  <a
+                    href={`https://doi.org/${selectedPaper.doi}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    View DOI
+                  </a>
+                )}
+                {selectedPaper.link && (
+                  <a
+                    href={selectedPaper.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Scopus Record
+                  </a>
+                )}
+                <button
+                  onClick={() => handleDownloadPdf(selectedPaper)}
+                  disabled={isProcessing}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition"
+                >
+                  {isProcessing ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {isProcessing ? 'Finding PDF...' : 'Download PDF'}
+                </button>
+                {isAdmin && (
+                  <>
+                    <button
+                      onClick={() => handleEditPaper(selectedPaper)}
+                      disabled={isProcessing}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"
+                    >
+                      <Edit3 className="h-4 w-4" />
+                      Edit Paper
+                    </button>
+                    <button
+                      onClick={() => handleReanalyzeSinglePaper(selectedPaper)}
+                      disabled={isProcessing}
+                      className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 transition"
+                    >
+                      {isProcessing ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      {isProcessing ? 'Re-analyzing...' : 'Re-analyze Paper'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Paper Modal */}
+      {showEditModal && editingPaper && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Edit Paper: {editingPaper.title}
+              </h2>
+              <button
+                onClick={handleCancelEdit}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Title */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Title
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.title || ''}
+                    onChange={(e) => handleFormChange('title', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Authors */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Authors (separate with semicolons)
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.authors || ''}
+                    onChange={(e) => handleFormChange('authors', e.target.value)}
+                    placeholder="Author 1; Author 2; Author 3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Year */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Year
+                  </label>
+                  <input
+                    type="number"
+                    value={editFormData.year || ''}
+                    onChange={(e) => handleFormChange('year', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Venue */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Journal/Venue
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.venue || ''}
+                    onChange={(e) => handleFormChange('venue', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* DOI */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    DOI
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.doi || ''}
+                    onChange={(e) => handleFormChange('doi', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Link */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Scopus Link
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.link || ''}
+                    onChange={(e) => handleFormChange('link', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Volume */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Volume
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.volume || ''}
+                    onChange={(e) => handleFormChange('volume', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Issue */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Issue
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.issue || ''}
+                    onChange={(e) => handleFormChange('issue', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Page Start */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Page Start
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.pageStart || ''}
+                    onChange={(e) => handleFormChange('pageStart', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Page End */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Page End
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.pageEnd || ''}
+                    onChange={(e) => handleFormChange('pageEnd', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Keywords */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Keywords (separate with semicolons)
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.keywords || ''}
+                    onChange={(e) => handleFormChange('keywords', e.target.value)}
+                    placeholder="keyword1; keyword2; keyword3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Abstract */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Abstract
+                  </label>
+                  <textarea
+                    value={editFormData.abstract || ''}
+                    onChange={(e) => handleFormChange('abstract', e.target.value)}
+                    rows={6}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                    placeholder="Enter the paper abstract here..."
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={isProcessing}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={isProcessing}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {isProcessing ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  {isProcessing ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
