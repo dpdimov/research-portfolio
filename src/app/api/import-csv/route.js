@@ -505,14 +505,57 @@ async function assignTheme(researchArea, allKeywords, authorKeywords = []) {
     }
   });
 
-  // If we found a good match (score > 3), use it
-  if (bestMatch && bestScore > 3) {
+  // If we found a good match (score > 4), use it
+  if (bestMatch && bestScore > 4) {
     return bestMatch.id;
   }
 
-  // Otherwise, create a new theme
-  const newTheme = await createNewTheme(themeArea, themeKeywords);
-  return newTheme.id;
+  // Map specific areas to broader themes
+  const broadThemeMapping = {
+    'Venture Capital & Funding': ['venture capital', 'funding', 'investment', 'financing', 'angel', 'investor'],
+    'Entrepreneurial Cognition': ['cognition', 'cognitive', 'psychology', 'thinking', 'perception', 'bias', 'heuristic', 'decision'],
+    'Innovation Management': ['innovation', 'creativity', 'idea', 'product development', 'r&d'],
+    'New Venture Creation': ['startup', 'new venture', 'venture creation', 'business formation', 'entrepreneurial process'],
+    'Entrepreneurial Networks': ['network', 'social capital', 'ties', 'relationship', 'collaboration'],
+    'International Entrepreneurship': ['international', 'cross-border', 'global', 'emerging market'],
+    'Technology Entrepreneurship': ['technology', 'high-tech', 'biotechnology', 'digital'],
+    'Family Business': ['family business', 'family firm'],
+    'Corporate Entrepreneurship': ['corporate entrepreneurship', 'spin-off', 'intrapreneurship'],
+    'Entrepreneurial Learning': ['learning', 'knowledge', 'experience', 'education'],
+    'Entrepreneurship and Innovation': [] // Default catch-all
+  };
+
+  // Try to map to a broader theme
+  for (const [broadTheme, keywords] of Object.entries(broadThemeMapping)) {
+    if (keywords.some(keyword => 
+      themeArea.toLowerCase().includes(keyword) || 
+      themeKeywords.some(k => k.toLowerCase().includes(keyword))
+    )) {
+      // Find or create the broad theme
+      let existingBroadTheme = existingThemes.rows.find(theme => 
+        theme.name.toLowerCase() === broadTheme.toLowerCase()
+      );
+      
+      if (existingBroadTheme) {
+        return existingBroadTheme.id;
+      } else {
+        const newBroadTheme = await createNewTheme(broadTheme, keywords);
+        return newBroadTheme.id;
+      }
+    }
+  }
+
+  // Default to general theme if no specific match
+  let generalTheme = existingThemes.rows.find(theme => 
+    theme.name.toLowerCase() === 'entrepreneurship and innovation'
+  );
+  
+  if (generalTheme) {
+    return generalTheme.id;
+  } else {
+    const newGeneralTheme = await createNewTheme('Entrepreneurship and Innovation', ['entrepreneurship', 'innovation']);
+    return newGeneralTheme.id;
+  }
 }
 
 async function createNewTheme(researchArea, keywords) {

@@ -9,6 +9,7 @@ const ResearchPortfolio = () => {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState('browse');
   const [selectedTheme, setSelectedTheme] = useState(null);
+  const [selectedKeyword, setSelectedKeyword] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState('');
@@ -65,14 +66,50 @@ const ResearchPortfolio = () => {
     loadData();
   }, []);
 
+  // Get all unique keywords for the dropdown
+  const allKeywords = [...new Set(
+    researchData.papers.flatMap(paper => paper.keywords)
+  )].sort();
+
   const filteredPapers = researchData.papers.filter(paper => {
     const matchesSearch = searchQuery === '' || 
       paper.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       paper.keywords.some(keyword => keyword.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesTheme = selectedTheme === null || paper.themeId === selectedTheme;
-    return matchesSearch && matchesTheme;
+    const matchesKeyword = selectedKeyword === null || paper.keywords.includes(selectedKeyword);
+    return matchesSearch && matchesTheme && matchesKeyword;
   });
 
+
+  const handleConsolidateThemes = async () => {
+    if (confirm('This will consolidate all themes into 8 broader categories and reassign all papers based on their content. This action cannot be undone. Continue?')) {
+      setIsProcessing(true);
+      try {
+        const response = await fetch('/api/consolidate-themes-v2', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          // Update the research data with consolidated themes
+          setResearchData(result.data);
+          
+          alert(result.message);
+        } else {
+          alert('Theme consolidation failed: ' + result.error);
+        }
+      } catch (error) {
+        console.error('Theme consolidation error:', error);
+        alert('Theme consolidation failed: ' + error.message);
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
 
   const handleReanalyzePapers = async () => {
     if (confirm('This will re-analyze existing papers with AI to improve titles, authors, and summaries. Continue?')) {
@@ -441,6 +478,14 @@ const ResearchPortfolio = () => {
               {isAdmin && (
                 <>
                   <button
+                    onClick={handleConsolidateThemes}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
+                  >
+                    <Tag className={`h-4 w-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                    Consolidate Themes
+                  </button>
+                  <button
                     onClick={handleReanalyzePapers}
                     disabled={isProcessing}
                     className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
@@ -638,8 +683,9 @@ const ResearchPortfolio = () => {
 
             {/* Main Content - Papers */}
             <div className="lg:col-span-3">
-              {/* Search Bar */}
-              <div className="mb-6">
+              {/* Search and Filters */}
+              <div className="mb-6 space-y-4">
+                {/* Search Bar */}
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-5 w-5" />
                   <input
@@ -649,6 +695,35 @@ const ResearchPortfolio = () => {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
+                </div>
+
+                {/* Keyword Filter */}
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <select
+                      value={selectedKeyword || ''}
+                      onChange={(e) => setSelectedKeyword(e.target.value || null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    >
+                      <option value="">All Keywords ({allKeywords.length})</option>
+                      {allKeywords.map((keyword, index) => (
+                        <option key={index} value={keyword}>
+                          {keyword} ({researchData.papers.filter(p => p.keywords.includes(keyword)).length})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {(selectedKeyword || selectedTheme) && (
+                    <button
+                      onClick={() => {
+                        setSelectedKeyword(null);
+                        setSelectedTheme(null);
+                      }}
+                      className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
                 </div>
               </div>
 
