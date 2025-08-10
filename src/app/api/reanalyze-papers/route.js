@@ -57,7 +57,7 @@ export async function POST() {
         updatedCount++;
         console.log(`Successfully updated: ${aiAnalysis.title}`);
 
-      } catch {
+      } catch (error) {
         console.error(`Error re-analyzing paper ${paper.id}:`, error.message);
         errorCount++;
       }
@@ -90,7 +90,7 @@ export async function POST() {
       }
     });
 
-  } catch {
+  } catch (error) {
     console.error('Re-analysis error:', error);
     return NextResponse.json({
       success: false,
@@ -178,7 +178,7 @@ async function analyzeResearchPaper(text, filename) {
     analysis.themeId = themeId;
     
     return analysis;
-  } catch {
+  } catch (error) {
     console.error('AI analysis error:', error);
     // Enhanced fallback analysis - extract better info from filename
     const nameWithoutExt = filename.replace(/\.pdf$/i, '');
@@ -249,7 +249,7 @@ async function assignTheme(researchArea, keywords) {
 
     // Otherwise, return default theme
     return 1;
-  } catch {
+  } catch (error) {
     console.error('Theme assignment error:', error);
     return 1; // Default theme
   }
@@ -264,7 +264,7 @@ function formatPaperForClient(paper) {
     if (!Array.isArray(authors)) {
       authors = [paper.authors];
     }
-  } catch {
+  } catch (error) {
     authors = [paper.authors || 'Unknown Author'];
   }
 
@@ -274,7 +274,7 @@ function formatPaperForClient(paper) {
     if (!Array.isArray(keywords)) {
       keywords = [paper.keywords];
     }
-  } catch {
+  } catch (error) {
     keywords = [paper.keywords || 'research'];
   }
 
@@ -289,6 +289,7 @@ function formatPaperForClient(paper) {
     themeId: paper.theme_id
   };
 }
+
 
 function formatThemeForClient(theme) {
   return {
