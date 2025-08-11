@@ -92,7 +92,12 @@ const ResearchPortfolio = () => {
     const matchesSearch = searchQuery === '' || 
       paper.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       paper.keywords.some(keyword => keyword.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesTheme = selectedTheme === null || paper.themeId === selectedTheme;
+    
+    // Updated theme matching for multiple themes per paper
+    const matchesTheme = selectedTheme === null || 
+      (paper.themes && paper.themes.some(theme => theme.id === selectedTheme)) ||
+      paper.themeId === selectedTheme; // Backward compatibility
+    
     const matchesKeyword = selectedKeyword === null || paper.keywords.includes(selectedKeyword);
     const matchesType = selectedType === null || paper.type === selectedType;
     return matchesSearch && matchesTheme && matchesKeyword && matchesType;
@@ -853,6 +858,23 @@ const ResearchPortfolio = () => {
                         </>
                       )}
                     </div>
+
+                    {/* Multiple Themes Display */}
+                    {paper.themes && paper.themes.length > 0 && (
+                      <div className="flex items-center gap-2 mb-3">
+                        <Tag className="h-4 w-4 text-gray-400" />
+                        <div className="flex gap-2 flex-wrap">
+                          {paper.themes.map((theme) => (
+                            <span
+                              key={theme.id}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${theme.color || 'bg-gray-100 text-gray-800'}`}
+                            >
+                              {theme.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     <p className="text-gray-700 mb-4 leading-relaxed">{paper.summary}</p>
 

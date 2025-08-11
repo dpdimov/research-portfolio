@@ -32,20 +32,20 @@ export async function POST(request) {
     // Use provided summary/abstract or create a placeholder
     const summary = paperData.abstract || 'No abstract provided';
 
-    // Get the first available theme as default
+    // Get suitable themes based on keywords - now supports multiple themes
     const defaultTheme = await sql`SELECT id FROM themes ORDER BY id LIMIT 1`;
-    let themeId = defaultTheme.rows.length > 0 ? defaultTheme.rows[0].id : 1;
+    let themeIds = [defaultTheme.rows.length > 0 ? defaultTheme.rows[0].id : 1];
 
-    // Try to find or create a suitable theme based on keywords
+    // Try to find multiple suitable themes based on keywords
     if (keywordsArray.length > 0) {
-      themeId = await assignThemeBasedOnKeywords(keywordsArray, themeId);
+      themeIds = await assignMultipleThemesBasedOnKeywords(keywordsArray, themeIds[0]);
     }
 
     // Validate type
     const validTypes = ['book', 'article', 'chapter', 'report', 'other'];
     const type = validTypes.includes(paperData.type) ? paperData.type : 'other';
 
-    // Insert the new paper
+    // Insert the new paper (keeping theme_id for backward compatibility)
     const result = await sql`
       INSERT INTO papers (
         title, authors, year, venue, summary, keywords, theme_id,
@@ -57,7 +57,7 @@ export async function POST(request) {
         ${paperData.venue},
         ${summary},
         ${JSON.stringify(keywordsArray)},
-        ${themeId},
+        ${themeIds[0]}, 
         ${paperData.doi || null},
         ${paperData.link || null},
         ${paperData.volume || null},
@@ -72,19 +72,34 @@ export async function POST(request) {
 
     const newPaper = result.rows[0];
 
-    // Get the paper with theme information
-    const paperWithTheme = await sql`
-      SELECT p.*, t.name as theme_name, t.color as theme_color
-      FROM papers p
-      LEFT JOIN themes t ON p.theme_id = t.id
-      WHERE p.id = ${newPaper.id}
+    // Add theme associations to junction table
+    for (const themeId of themeIds) {
+      await sql`
+        INSERT INTO paper_themes (paper_id, theme_id)
+        VALUES (${newPaper.id}, ${themeId})
+        ON CONFLICT (paper_id, theme_id) DO NOTHING
+      `;
+    }
+
+    // Get the paper with all its themes
+    const paperThemes = await sql`
+      SELECT t.id, t.name, t.color, t.description
+      FROM paper_themes pt
+      JOIN themes t ON pt.theme_id = t.id
+      WHERE pt.paper_id = ${newPaper.id}
+      ORDER BY t.name
     `;
+
+    const paperWithThemes = {
+      ...newPaper,
+      themes: paperThemes.rows
+    };
 
     // Return success with the formatted paper data
     return NextResponse.json({
       success: true,
       message: 'Paper added successfully',
-      paper: formatPaperForClient(paperWithTheme.rows[0])
+      paper: formatPaperForClient(paperWithThemes)
     });
 
   } catch (error) {
@@ -96,9 +111,9 @@ export async function POST(request) {
   }
 }
 
-async function assignThemeBasedOnKeywords(keywords, defaultThemeId) {
-  // Simple theme assignment based on keywords
-  // This is a basic implementation - you might want to make it more sophisticated
+async function assignMultipleThemesBasedOnKeywords(keywords, defaultThemeId) {
+  // Enhanced theme assignment that can return multiple themes
+  const foundThemeIds = new Set();
   
   const keywordThemes = {
     'venture capital': ['venture capital', 'funding', 'investment', 'financing'],
@@ -108,9 +123,14 @@ async function assignThemeBasedOnKeywords(keywords, defaultThemeId) {
     'entrepreneurial networks': ['network', 'social capital', 'ties', 'relationship'],
     'international entrepreneurship': ['international', 'cross-border', 'global'],
     'technology entrepreneurship': ['technology', 'high-tech', 'biotechnology', 'digital'],
+    'design': ['design', 'user experience', 'product design', 'interface'],
+    'education': ['education', 'teaching', 'learning', 'curriculum', 'pedagogy'],
+    'strategy': ['strategy', 'strategic', 'planning', 'competitive advantage'],
+    'marketing': ['marketing', 'branding', 'advertising', 'promotion'],
+    'finance': ['finance', 'financial', 'investment', 'capital']
   };
 
-  // Check if any theme matches the keywords
+  // Check all themes that match the keywords
   for (const [themeType, themeKeywords] of Object.entries(keywordThemes)) {
     if (keywords.some(keyword => 
       themeKeywords.some(tk => keyword.toLowerCase().includes(tk.toLowerCase()))
@@ -123,13 +143,14 @@ async function assignThemeBasedOnKeywords(keywords, defaultThemeId) {
       `;
       
       if (existingTheme.rows.length > 0) {
-        return existingTheme.rows[0].id;
+        foundThemeIds.add(existingTheme.rows[0].id);
       }
     }
   }
 
-  // Return the provided default theme ID
-  return defaultThemeId;
+  // Return found themes, or default if none found
+  const themeIdsArray = Array.from(foundThemeIds);
+  return themeIdsArray.length > 0 ? themeIdsArray : [defaultThemeId];
 }
 
 function formatPaperForClient(paper) {
@@ -165,15 +186,17 @@ function formatPaperForClient(paper) {
     venue: paper.venue,
     summary: paper.summary,
     keywords: keywords,
-    themeId: paper.theme_id,
+    themes: paper.themes || [],
+    // Legacy fields for backward compatibility
+    themeId: paper.themes && paper.themes.length > 0 ? paper.themes[0].id : null,
+    themeName: paper.themes && paper.themes.length > 0 ? paper.themes[0].name : null,
+    themeColor: paper.themes && paper.themes.length > 0 ? paper.themes[0].color : null,
     doi: paper.doi,
     link: paper.link,
     volume: paper.volume,
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
-    type: paper.type || 'other',
-    themeName: paper.theme_name,
-    themeColor: paper.theme_color
+    type: paper.type || 'other'
   };
 }

@@ -5,28 +5,45 @@ export async function GET() {
   try {
     console.log('Fetching papers from database...');
     
-    // Fetch all current data to return
+    // Fetch all papers with their associated themes
     const allPapers = await sql`
-      SELECT p.*, t.name as theme_name, t.color as theme_color
+      SELECT p.*
       FROM papers p
-      LEFT JOIN themes t ON p.theme_id = t.id
       ORDER BY p.year DESC, p.title ASC
     `;
 
+    // Fetch themes for each paper
+    const papersWithThemes = await Promise.all(
+      allPapers.rows.map(async (paper) => {
+        const paperThemes = await sql`
+          SELECT t.id, t.name, t.color, t.description
+          FROM paper_themes pt
+          JOIN themes t ON pt.theme_id = t.id
+          WHERE pt.paper_id = ${paper.id}
+          ORDER BY t.name
+        `;
+        
+        return {
+          ...paper,
+          themes: paperThemes.rows
+        };
+      })
+    );
+
     const allThemes = await sql`
-      SELECT t.*, COUNT(p.id) as paper_count
+      SELECT t.*, COUNT(pt.paper_id) as paper_count
       FROM themes t
-      LEFT JOIN papers p ON t.id = p.theme_id
+      LEFT JOIN paper_themes pt ON t.id = pt.theme_id
       GROUP BY t.id, t.name, t.description, t.color
       ORDER BY paper_count DESC, t.name ASC
     `;
 
-    console.log(`Found ${allPapers.rows.length} papers and ${allThemes.rows.length} themes`);
+    console.log(`Found ${papersWithThemes.length} papers and ${allThemes.rows.length} themes`);
 
     return NextResponse.json({
       success: true,
       data: {
-        papers: allPapers.rows.map(formatPaperForClient),
+        papers: papersWithThemes.map(formatPaperForClient),
         themes: allThemes.rows.map(formatThemeForClient)
       }
     });
@@ -63,16 +80,18 @@ function formatPaperForClient(paper) {
     venue: paper.venue,
     summary: paper.summary,
     keywords: keywords,
-    themeId: paper.theme_id,
+    themes: paper.themes || [],
+    // Legacy fields for backward compatibility
+    themeId: paper.themes && paper.themes.length > 0 ? paper.themes[0].id : null,
+    themeName: paper.themes && paper.themes.length > 0 ? paper.themes[0].name : null,
+    themeColor: paper.themes && paper.themes.length > 0 ? paper.themes[0].color : null,
     doi: paper.doi,
     link: paper.link,
     volume: paper.volume,
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
-    type: paper.type || 'other',
-    themeName: paper.theme_name,
-    themeColor: paper.theme_color
+    type: paper.type || 'other'
   };
 }
 
