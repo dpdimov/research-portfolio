@@ -172,6 +172,22 @@ function parseRowData(headers, row) {
       case 'Page end':
         paper.pageEnd = value;
         break;
+      case 'Type':
+      case 'Document Type':
+        // Map common publication types
+        const normalizedType = value.toLowerCase().trim();
+        if (normalizedType.includes('book')) {
+          paper.type = 'book';
+        } else if (normalizedType.includes('chapter')) {
+          paper.type = 'chapter';
+        } else if (normalizedType.includes('report')) {
+          paper.type = 'report';
+        } else if (normalizedType.includes('article') || normalizedType.includes('journal')) {
+          paper.type = 'article';
+        } else {
+          paper.type = 'other';
+        }
+        break;
     }
   }
   
@@ -306,7 +322,7 @@ async function insertPaper(paper, aiAnalysis) {
   await sql`
     INSERT INTO papers (
       title, authors, year, venue, summary, keywords, theme_id,
-      doi, link, volume, issue, page_start, page_end, full_text
+      doi, link, volume, issue, page_start, page_end, full_text, type
     ) VALUES (
       ${paper.title},
       ${JSON.stringify(authorsArray)},
@@ -321,7 +337,8 @@ async function insertPaper(paper, aiAnalysis) {
       ${paper.issue || null},
       ${paper.pageStart || null},
       ${paper.pageEnd || null},
-      ${paper.abstract || null}
+      ${paper.abstract || null},
+      ${paper.type || 'other'}
     )
   `;
 }
@@ -367,6 +384,7 @@ function formatPaperForClient(paper) {
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
+    type: paper.type || 'other',
     themeName: paper.theme_name,
     themeColor: paper.theme_color
   };

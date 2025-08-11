@@ -80,6 +80,14 @@ export async function POST(request) {
       updateValues.push(updates.pageEnd || null);
     }
 
+    if (updates.type !== undefined) {
+      // Validate type value
+      const validTypes = ['book', 'article', 'chapter', 'report', 'other'];
+      const type = validTypes.includes(updates.type) ? updates.type : 'other';
+      updateFields.push(`type = $${paramIndex++}`);
+      updateValues.push(type);
+    }
+
     if (updateFields.length === 0) {
       return NextResponse.json({
         success: false,
@@ -175,6 +183,7 @@ function formatPaperForClient(paper) {
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
+    type: paper.type || 'other',
     themeName: paper.theme_name,
     themeColor: paper.theme_color
   };

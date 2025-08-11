@@ -10,6 +10,7 @@ const ResearchPortfolio = () => {
   const [activeTab, setActiveTab] = useState('browse');
   const [selectedTheme, setSelectedTheme] = useState(null);
   const [selectedKeyword, setSelectedKeyword] = useState(null);
+  const [selectedType, setSelectedType] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState('');
@@ -25,6 +26,22 @@ const ResearchPortfolio = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingPaper, setEditingPaper] = useState(null);
   const [editFormData, setEditFormData] = useState({});
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+    title: '',
+    authors: '',
+    year: new Date().getFullYear(),
+    venue: '',
+    abstract: '',
+    keywords: '',
+    doi: '',
+    link: '',
+    volume: '',
+    issue: '',
+    pageStart: '',
+    pageEnd: '',
+    type: 'other'
+  });
 
   const [researchData, setResearchData] = useState({
     themes: [],
@@ -77,7 +94,8 @@ const ResearchPortfolio = () => {
       paper.keywords.some(keyword => keyword.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesTheme = selectedTheme === null || paper.themeId === selectedTheme;
     const matchesKeyword = selectedKeyword === null || paper.keywords.includes(selectedKeyword);
-    return matchesSearch && matchesTheme && matchesKeyword;
+    const matchesType = selectedType === null || paper.type === selectedType;
+    return matchesSearch && matchesTheme && matchesKeyword && matchesType;
   });
 
 
@@ -368,7 +386,8 @@ const ResearchPortfolio = () => {
       volume: paper.volume || '',
       issue: paper.issue || '',
       pageStart: paper.pageStart || '',
-      pageEnd: paper.pageEnd || ''
+      pageEnd: paper.pageEnd || '',
+      type: paper.type || 'other'
     });
     setShowEditModal(true);
   };
@@ -395,7 +414,8 @@ const ResearchPortfolio = () => {
         volume: editFormData.volume,
         issue: editFormData.issue,
         pageStart: editFormData.pageStart,
-        pageEnd: editFormData.pageEnd
+        pageEnd: editFormData.pageEnd,
+        type: editFormData.type || 'other'
       };
 
       const response = await fetch('/api/update-paper', {
@@ -453,6 +473,63 @@ const ResearchPortfolio = () => {
     }));
   };
 
+  const handleAddPaper = async () => {
+    if (!addFormData.title || !addFormData.authors || !addFormData.venue) {
+      alert('Please fill in all required fields (Title, Authors, and Venue)');
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+
+      const response = await fetch('/api/add-paper', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(addFormData)
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('Paper added successfully!');
+        
+        // Refresh the data to show the new paper
+        const refreshResponse = await fetch('/api/papers');
+        const refreshResult = await refreshResponse.json();
+        if (refreshResult.success) {
+          setResearchData(refreshResult.data);
+        }
+        
+        // Reset the form and close modal
+        setAddFormData({
+          title: '',
+          authors: '',
+          year: new Date().getFullYear(),
+          venue: '',
+          abstract: '',
+          keywords: '',
+          doi: '',
+          link: '',
+          volume: '',
+          issue: '',
+          pageStart: '',
+          pageEnd: '',
+          type: 'other'
+        });
+        setShowAddModal(false);
+      } else {
+        alert('Failed to add paper: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Add paper error:', error);
+      alert('Failed to add paper: ' + error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const formatCitation = (paper) => {
     const authors = paper.authors.join(', ');
     const pages = paper.pageStart && paper.pageEnd ? `, ${paper.pageStart}-${paper.pageEnd}` : '';
@@ -500,6 +577,14 @@ const ResearchPortfolio = () => {
                   >
                     <Upload className="h-4 w-4" />
                     Import CSV
+                  </button>
+                  <button
+                    onClick={() => setShowAddModal(true)}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Add Paper
                   </button>
                 </>
               )}
@@ -697,7 +782,7 @@ const ResearchPortfolio = () => {
                   />
                 </div>
 
-                {/* Keyword Filter */}
+                {/* Keyword and Type Filters */}
                 <div className="flex items-center gap-4">
                   <div className="flex-1">
                     <select
@@ -713,11 +798,26 @@ const ResearchPortfolio = () => {
                       ))}
                     </select>
                   </div>
-                  {(selectedKeyword || selectedTheme) && (
+                  <div className="flex-1">
+                    <select
+                      value={selectedType || ''}
+                      onChange={(e) => setSelectedType(e.target.value || null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    >
+                      <option value="">All Types ({researchData.papers.length})</option>
+                      <option value="article">Articles ({researchData.papers.filter(p => p.type === 'article').length})</option>
+                      <option value="book">Books ({researchData.papers.filter(p => p.type === 'book').length})</option>
+                      <option value="chapter">Chapters ({researchData.papers.filter(p => p.type === 'chapter').length})</option>
+                      <option value="report">Reports ({researchData.papers.filter(p => p.type === 'report').length})</option>
+                      <option value="other">Other ({researchData.papers.filter(p => p.type === 'other' || !p.type).length})</option>
+                    </select>
+                  </div>
+                  {(selectedKeyword || selectedTheme || selectedType) && (
                     <button
                       onClick={() => {
                         setSelectedKeyword(null);
                         setSelectedTheme(null);
+                        setSelectedType(null);
                       }}
                       className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
@@ -744,6 +844,14 @@ const ResearchPortfolio = () => {
                       <span>{paper.year}</span>
                       <span className="mx-2">•</span>
                       <span className="font-medium">{paper.venue}</span>
+                      {paper.type && paper.type !== 'other' && (
+                        <>
+                          <span className="mx-2">•</span>
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium capitalize">
+                            {paper.type}
+                          </span>
+                        </>
+                      )}
                     </div>
 
                     <p className="text-gray-700 mb-4 leading-relaxed">{paper.summary}</p>
@@ -906,6 +1014,10 @@ const ResearchPortfolio = () => {
                     <div>
                       <span className="font-medium text-gray-700">Journal/Venue:</span>
                       <p className="text-gray-900">{selectedPaper.venue}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Type:</span>
+                      <p className="text-gray-900 capitalize">{selectedPaper.type || 'other'}</p>
                     </div>
                     {selectedPaper.volume && (
                       <div>
@@ -1099,6 +1211,24 @@ const ResearchPortfolio = () => {
                   />
                 </div>
 
+                {/* Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Type
+                  </label>
+                  <select
+                    value={editFormData.type || 'other'}
+                    onChange={(e) => handleFormChange('type', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-900"
+                  >
+                    <option value="article">Article</option>
+                    <option value="book">Book</option>
+                    <option value="chapter">Chapter</option>
+                    <option value="report">Report</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
                 {/* DOI */}
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-2">
@@ -1224,6 +1354,233 @@ const ResearchPortfolio = () => {
                     <RefreshCw className="h-4 w-4 animate-spin" />
                   ) : null}
                   {isProcessing ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Paper Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Add New Paper
+              </h2>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Title */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.title || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, title: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    placeholder="Enter paper title"
+                  />
+                </div>
+
+                {/* Authors */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Authors (separate with semicolons) *
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.authors || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, authors: e.target.value }))}
+                    placeholder="Author 1; Author 2; Author 3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Year */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Year *
+                  </label>
+                  <input
+                    type="number"
+                    value={addFormData.year || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, year: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Venue */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Journal/Venue *
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.venue || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, venue: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    placeholder="Journal or venue name"
+                  />
+                </div>
+
+                {/* Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Type
+                  </label>
+                  <select
+                    value={addFormData.type || 'other'}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  >
+                    <option value="article">Article</option>
+                    <option value="book">Book</option>
+                    <option value="chapter">Chapter</option>
+                    <option value="report">Report</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                {/* DOI */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    DOI
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.doi || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, doi: e.target.value }))}
+                    placeholder="10.1000/journal.123456"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Link */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Scopus/Publisher Link
+                  </label>
+                  <input
+                    type="url"
+                    value={addFormData.link || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, link: e.target.value }))}
+                    placeholder="https://www.scopus.com/..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Volume */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Volume
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.volume || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, volume: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Issue */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Issue
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.issue || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, issue: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Page Start */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Page Start
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.pageStart || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, pageStart: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Page End */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Page End
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.pageEnd || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, pageEnd: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Keywords */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Keywords (separate with semicolons)
+                  </label>
+                  <input
+                    type="text"
+                    value={addFormData.keywords || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, keywords: e.target.value }))}
+                    placeholder="keyword1; keyword2; keyword3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                  />
+                </div>
+
+                {/* Abstract */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-900 mb-2">
+                    Abstract
+                  </label>
+                  <textarea
+                    value={addFormData.abstract || ''}
+                    onChange={(e) => setAddFormData(prev => ({ ...prev, abstract: e.target.value }))}
+                    rows={6}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    placeholder="Enter the paper abstract here..."
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  disabled={isProcessing}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddPaper}
+                  disabled={isProcessing || !addFormData.title || !addFormData.authors || !addFormData.venue}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isProcessing ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  {isProcessing ? 'Adding...' : 'Add Paper'}
                 </button>
               </div>
             </div>

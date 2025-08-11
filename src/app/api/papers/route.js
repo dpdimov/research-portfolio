@@ -70,6 +70,7 @@ function formatPaperForClient(paper) {
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
+    type: paper.type || 'other',
     themeName: paper.theme_name,
     themeColor: paper.theme_color
   };
