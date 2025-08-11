@@ -38,18 +38,52 @@ export async function POST() {
           paper.dropbox_path.split('/').pop() : 
           `${paper.title}.pdf`;
 
-        // Use AI to analyze the paper
+        // Use AI to analyze the paper with multi-theme support
         const aiAnalysis = await analyzeResearchPaper(paper.full_text, filename);
 
-        // ONLY update AI-generated fields, preserve original CSV data
+        // Validate that theme IDs exist (single query for efficiency)
+        let validThemeIds = [];
+        if (aiAnalysis.themeIds && aiAnalysis.themeIds.length > 0) {
+          const existingThemes = await sql`
+            SELECT id FROM themes 
+            WHERE id = ANY(${aiAnalysis.themeIds})
+          `;
+          validThemeIds = existingThemes.rows.map(row => row.id);
+        }
+
+        // If no valid themes found, use first available theme as fallback
+        if (validThemeIds.length === 0) {
+          console.log(`No valid themes found for paper ${paper.id}, using fallback`);
+          const fallbackTheme = await sql`SELECT id FROM themes ORDER BY id LIMIT 1`;
+          if (fallbackTheme.rows.length > 0) {
+            validThemeIds.push(fallbackTheme.rows[0].id);
+          } else {
+            console.error(`No themes exist in database for paper ${paper.id}`);
+            continue; // Skip this paper if no themes exist at all
+          }
+        }
+
+        // Update AI-generated fields, preserve original CSV data
         await sql`
           UPDATE papers 
           SET 
             summary = ${aiAnalysis.summary},
-            theme_id = ${aiAnalysis.themeId},
+            theme_id = ${validThemeIds[0]},
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ${paper.id}
         `;
+
+        // Clear existing theme associations for this paper
+        await sql`DELETE FROM paper_themes WHERE paper_id = ${paper.id}`;
+
+        // Add new multi-theme associations (only valid theme IDs)
+        for (const themeId of validThemeIds) {
+          await sql`
+            INSERT INTO paper_themes (paper_id, theme_id)
+            VALUES (${paper.id}, ${themeId})
+            ON CONFLICT (paper_id, theme_id) DO NOTHING
+          `;
+        }
 
         updatedCount++;
         console.log(`Successfully updated: ${aiAnalysis.title}`);
@@ -60,18 +94,35 @@ export async function POST() {
       }
     }
 
-    // Get updated data to return
+    // Get updated data with multi-theme support
     const allPapers = await sql`
-      SELECT p.*, t.name as theme_name, t.color as theme_color
+      SELECT p.*
       FROM papers p
-      LEFT JOIN themes t ON p.theme_id = t.id
       ORDER BY p.year DESC, p.title ASC
     `;
 
+    // Fetch themes for each paper
+    const papersWithThemes = await Promise.all(
+      allPapers.rows.map(async (paper) => {
+        const paperThemes = await sql`
+          SELECT t.id, t.name, t.color, t.description
+          FROM paper_themes pt
+          JOIN themes t ON pt.theme_id = t.id
+          WHERE pt.paper_id = ${paper.id}
+          ORDER BY t.name
+        `;
+        
+        return {
+          ...paper,
+          themes: paperThemes.rows
+        };
+      })
+    );
+
     const allThemes = await sql`
-      SELECT t.*, COUNT(p.id) as paper_count
+      SELECT t.*, COUNT(pt.paper_id) as paper_count
       FROM themes t
-      LEFT JOIN papers p ON t.id = p.theme_id
+      LEFT JOIN paper_themes pt ON t.id = pt.theme_id
       GROUP BY t.id, t.name, t.description, t.color
       ORDER BY paper_count DESC, t.name ASC
     `;
@@ -82,7 +133,7 @@ export async function POST() {
       errorCount,
       totalProcessed: papers.rows.length,
       data: {
-        papers: allPapers.rows.map(formatPaperForClient),
+        papers: papersWithThemes.map(formatPaperForClient),
         themes: allThemes.rows.map(formatThemeForClient)
       }
     });
@@ -181,16 +232,39 @@ async function analyzeResearchPaper(text, filename) {
       analysis = JSON.parse(analysisText);
     } catch (firstError) {
       console.log('First parse failed, trying to fix JSON:', firstError.message);
+      console.log('Problematic JSON:', analysisText);
       
-      // Try to fix common JSON issues
+      // Try multiple fix strategies
       let cleanedText = analysisText;
       
-      // Fix unescaped quotes in title and other string values
-      cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)",/g, ': "$1\\"$2\\"$3",');
-      cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)"/g, ': "$1\\"$2\\"$3"');
-      
-      console.log('Trying with cleaned text:', cleanedText.substring(0, 200) + '...');
-      analysis = JSON.parse(cleanedText);
+      try {
+        // Strategy 1: Fix unescaped quotes in string values
+        cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)",/g, ': "$1\\"$2\\"$3",');
+        cleanedText = cleanedText.replace(/: "([^"]*)"([^",}]*)"([^"]*)"/g, ': "$1\\"$2\\"$3"');
+        
+        analysis = JSON.parse(cleanedText);
+      } catch {
+        console.log('Second strategy failed, trying more aggressive fixes');
+        
+        // Strategy 2: More aggressive cleaning
+        cleanedText = analysisText
+          .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '') // Remove control characters
+          .replace(/\\n/g, ' ') // Replace literal \n with space
+          .replace(/\\t/g, ' ') // Replace literal \t with space
+          .replace(/\n/g, ' ') // Replace actual newlines with space
+          .replace(/\r/g, ' ') // Replace carriage returns with space
+          .replace(/\t/g, ' ') // Replace tabs with space
+          .replace(/  +/g, ' ') // Collapse multiple spaces
+          .replace(/",\s*"/g, '", "') // Fix comma spacing
+          .trim();
+        
+        try {
+          analysis = JSON.parse(cleanedText);
+        } catch (thirdError) {
+          console.error('All JSON parsing strategies failed. Raw text:', analysisText);
+          throw new Error(`JSON parsing failed: ${thirdError.message}. Raw: ${analysisText.substring(0, 200)}...`);
+        }
+      }
     }
     
     // Ensure authors and keywords are arrays
@@ -208,9 +282,9 @@ async function analyzeResearchPaper(text, filename) {
       analysis.keywords = ['research'];
     }
     
-    // Assign theme based on research area
-    const themeId = await assignTheme(analysis.researchArea, analysis.keywords);
-    analysis.themeId = themeId;
+    // Assign multiple themes based on research area and keywords
+    const themeIds = await assignMultipleThemes(analysis.researchArea, analysis.keywords);
+    analysis.themeIds = themeIds;
     
     return analysis;
   } catch (error) {
@@ -241,52 +315,79 @@ async function analyzeResearchPaper(text, filename) {
       venue: 'Unknown Venue',
       summary: `Research paper: ${title}. AI analysis failed, information extracted from filename.`,
       keywords: keywords.length > 0 ? keywords : ['research'],
-      themeId: 1, // Default theme
+      themeIds: [1], // Default theme array
       researchArea: 'General Research'
     };
   }
 }
 
-// Theme assignment function (simplified version)
-async function assignTheme(researchArea, keywords) {
+// Multi-theme assignment function
+async function assignMultipleThemes(researchArea, keywords) {
   try {
-    // First, try to find an existing theme that matches
+    const matchingThemes = new Set();
+    
+    // Get all existing themes
     const existingThemes = await sql`SELECT * FROM themes`;
     
-    const matchScore = (theme, area, kw) => {
-      let score = 0;
-      if (theme.name.toLowerCase().includes(area.toLowerCase())) score += 3;
-      if (theme.description.toLowerCase().includes(area.toLowerCase())) score += 2;
-      
-      kw.forEach(keyword => {
-        if (theme.name.toLowerCase().includes(keyword.toLowerCase())) score += 1;
-        if (theme.description.toLowerCase().includes(keyword.toLowerCase())) score += 0.5;
-      });
-      
-      return score;
+    // Enhanced keyword matching for multiple themes
+    const keywordThemes = {
+      'venture capital': ['venture capital', 'funding', 'investment', 'financing'],
+      'entrepreneurial cognition': ['cognition', 'cognitive', 'psychology', 'thinking'],
+      'innovation': ['innovation', 'creativity', 'idea', 'product development'],
+      'new venture creation': ['startup', 'new venture', 'venture creation', 'business formation'],
+      'entrepreneurial networks': ['network', 'social capital', 'ties', 'relationship'],
+      'international': ['international', 'cross-border', 'global'],
+      'technology': ['technology', 'high-tech', 'biotechnology', 'digital'],
+      'design': ['design', 'user experience', 'product design', 'interface'],
+      'education': ['education', 'teaching', 'learning', 'curriculum', 'pedagogy'],
+      'strategy': ['strategy', 'strategic', 'planning', 'competitive advantage'],
+      'marketing': ['marketing', 'branding', 'advertising', 'promotion'],
+      'finance': ['finance', 'financial', 'investment', 'capital'],
+      'opportunity': ['opportunity', 'opportunities', 'recognition']
     };
 
-    let bestMatch = null;
-    let bestScore = 0;
-
-    existingThemes.rows.forEach(theme => {
-      const score = matchScore(theme, researchArea, keywords);
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = theme;
+    // Check all themes that match the keywords
+    for (const [themeType, themeKeywords] of Object.entries(keywordThemes)) {
+      if (keywords.some(keyword => 
+        themeKeywords.some(tk => keyword.toLowerCase().includes(tk.toLowerCase()))
+      )) {
+        // Try to find existing theme
+        const existingTheme = existingThemes.rows.find(theme =>
+          theme.name.toLowerCase().includes(themeType.split(' ')[0]) ||
+          theme.description.toLowerCase().includes(themeType)
+        );
+        
+        if (existingTheme) {
+          matchingThemes.add(existingTheme.id);
+        }
       }
-    });
-
-    // If we found a good match (score > 2), use it
-    if (bestMatch && bestScore > 2) {
-      return bestMatch.id;
     }
 
-    // Otherwise, return default theme
-    return 1;
+    // Also check research area for theme matches
+    if (researchArea && researchArea !== 'Entrepreneurship and Innovation') {
+      const areaTheme = existingThemes.rows.find(theme =>
+        theme.name.toLowerCase().includes(researchArea.toLowerCase()) ||
+        theme.description.toLowerCase().includes(researchArea.toLowerCase())
+      );
+      
+      if (areaTheme) {
+        matchingThemes.add(areaTheme.id);
+      }
+    }
+
+    // Return found themes, or default if none found
+    const themeIdsArray = Array.from(matchingThemes);
+    if (themeIdsArray.length > 0) {
+      return themeIdsArray;
+    }
+
+    // Get default theme if no matches
+    const defaultTheme = await sql`SELECT id FROM themes ORDER BY id LIMIT 1`;
+    return defaultTheme.rows.length > 0 ? [defaultTheme.rows[0].id] : [1];
+    
   } catch (error) {
-    console.error('Theme assignment error:', error);
-    return 1; // Default theme
+    console.error('Multi-theme assignment error:', error);
+    return [1]; // Default theme array
   }
 }
 
@@ -325,15 +426,18 @@ function formatPaperForClient(paper) {
     venue: paper.venue,
     summary: paper.summary,
     keywords: keywords,
-    themeId: paper.theme_id,
+    themes: paper.themes || [],
+    // Legacy fields for backward compatibility
+    themeId: paper.themes && paper.themes.length > 0 ? paper.themes[0].id : paper.theme_id,
+    themeName: paper.themes && paper.themes.length > 0 ? paper.themes[0].name : null,
+    themeColor: paper.themes && paper.themes.length > 0 ? paper.themes[0].color : null,
     doi: paper.doi,
     link: paper.link,
     volume: paper.volume,
     issue: paper.issue,
     pageStart: paper.page_start,
     pageEnd: paper.page_end,
-    themeName: paper.theme_name,
-    themeColor: paper.theme_color
+    type: paper.type || 'other'
   };
 }
 
